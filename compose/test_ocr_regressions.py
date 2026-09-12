@@ -290,6 +290,47 @@ class RegressionTests(unittest.TestCase):
             with fitz.open(stream=untouched, filetype='pdf') as sent:
                 self.assertIn('content', sent[0].get_text())
 
+    def test_debug_borders_land_on_the_text_on_a_cropped_page(self):
+        """draw_rect works from the media box, so a crop box shifted the borders."""
+        import numpy as np
+        with tempfile.TemporaryDirectory() as td:
+            src, out = Path(td)/'in.pdf', Path(td)/'out.pdf'
+            with fitz.open() as doc:
+                page = doc.new_page(width=300, height=200)
+                page.insert_text((22, 38), 'marker text', fontsize=15)
+                page.set_rotation(270)
+                page.set_cropbox(fitz.Rect(6, 6, 294, 194))
+                doc.save(src)
+
+            zoom = 6.0
+            with fitz.open(src) as doc:
+                page = doc[0]
+                pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom),
+                                      colorspace=fitz.csGRAY, alpha=False)
+                g = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+                    pix.height, pix.width)
+                ys, xs = np.nonzero(g < 150)
+                ink = fitz.Rect(xs.min()/zoom, ys.min()/zoom,
+                                xs.max()/zoom, ys.max()/zoom)
+                size = (page.rect.width, page.rect.height)
+            # Describe the block exactly where the ink is, at scale 1.
+            pruned = {'width': size[0], 'height': size[1], 'parsing_res_list': [
+                {'block_content': 'marker text',
+                 'block_bbox': [ink.x0 - 2, ink.y0 - 2, ink.x1 + 2, ink.y1 + 2]}]}
+            ocr.overlay(src, [pruned], out, debug=True, automatic=False)
+
+            with fitz.open(out) as doc:
+                page = doc[0]
+                pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+                arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+                    pix.height, pix.width, 3)
+                red = (arr[:, :, 0] > 150) & (arr[:, :, 1] < 110) & (arr[:, :, 2] < 110)
+                ys, xs = np.nonzero(red)
+            self.assertTrue(xs.size, 'no debug border was drawn')
+            # The border must sit on the ink it marks, not a crop box away.
+            self.assertAlmostEqual(xs.min()/zoom, ink.x0, delta=2.0)
+            self.assertAlmostEqual(ys.min()/zoom, ink.y0, delta=2.0)
+
     def test_math_conversion_is_conservative(self):
         self.assertEqual(ocr.strip_html(r'$ 3 \times 8 $ decoder'), '3 × 8 decoder')
         for text in (r'$\frac{a}{b}$', r'$x_{1} \times y$', r'$x \unknown y$',

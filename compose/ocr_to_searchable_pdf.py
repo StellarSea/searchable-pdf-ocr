@@ -1365,8 +1365,16 @@ def overlay(
             else:
                 para_fallback += 1
 
+        crop = page.cropbox_position
+        shave = (crop.x, crop.y, crop.x, crop.y)
         for lr in debug_rects:
-            page.draw_rect(lr * page.derotation_matrix, color=(1, 0, 0), width=0.4)
+            # draw_rect puts its shape at media box coordinates, while these
+            # rects live in page.rect space, which starts at the crop box. The
+            # two are the same on an uncropped page and a couple of points apart
+            # on a cropped one, which drew every border off the text it marks
+            # even though the text itself was placed correctly.
+            page.draw_rect((lr - shave) * page.derotation_matrix,
+                           color=(1, 0, 0), width=0.4)
         info['inserted_lines'] = lines_ok-start_lines
         info['unassigned_boxes'] = empty_boxes-start_empty
         if textless_blocks > start_textless:
