@@ -235,7 +235,43 @@ def recognize_lines(png_images, timeout=120, lang=None):
     return values
 
 
+OCR_RENDER_ZOOM = 2.0
+
+
+def needs_flattening(src: Path) -> bool:
+    """True when a page carries a rotation or a crop box the layout model mishandles.
+
+    On a book whose pages were saved rotated and cropped, the layout model
+    returned less than half the text it finds on the very same pixels rendered
+    upright: one scan lost a whole table and a code listing per page. Books with
+    neither are unaffected, so they keep their existing caches and results.
+    """
+    with fitz.open(src) as doc:
+        return any(page.rotation or tuple(page.cropbox) != tuple(page.mediabox)
+                   for page in doc)
+
+
+def _flattened(doc, start, stop):
+    """Render pages to exactly the pixels page.rect describes, with no rotation."""
+    out = fitz.open()
+    try:
+        for index in range(start, stop):
+            pix = doc[index].get_pixmap(matrix=fitz.Matrix(OCR_RENDER_ZOOM, OCR_RENDER_ZOOM))
+            page = out.new_page(width=pix.width/OCR_RENDER_ZOOM,
+                                height=pix.height/OCR_RENDER_ZOOM)
+            page.insert_image(page.rect, pixmap=pix)
+        return out.tobytes(garbage=3, deflate=True)
+    finally:
+        out.close()
+
+
 def split_pdf(path: Path, size: int):
+    if needs_flattening(path):
+        with fitz.open(path) as doc:
+            total = len(doc)
+            for start in range(0, total, size):
+                yield start, _flattened(doc, start, min(start + size, total)), total
+        return
     reader = PdfReader(str(path))
     total = len(reader.pages)
     for start in range(0, total, size):
@@ -1393,7 +1429,12 @@ def source_identity(src):
     with src.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
-    return {"sha256": digest.hexdigest(), "api": API, "options": API_OPTIONS}
+    identity = {"sha256": digest.hexdigest(), "api": API, "options": API_OPTIONS}
+    # Only recorded when it applies, so a book that needs no flattening keeps
+    # the identity it already has and goes on reusing its cache.
+    if needs_flattening(src):
+        identity["ocr_input"] = f"flattened-{OCR_RENDER_ZOOM}x"
+    return identity
 
 
 def run_ocr(src: Path, batch: int, checkpoint=None, identity=None):
@@ -1426,7 +1467,12 @@ def run_ocr(src: Path, batch: int, checkpoint=None, identity=None):
             print(f"[{done}/{total}] {el:.1f}s  ({el / done:.2f}s/page)", flush=True)
     else:
         print("[ocr] 전체 전송 중... (완료까지 출력이 없습니다)", flush=True)
-        res = ocr_pdf(src.read_bytes())
+        if needs_flattening(src):
+            with fitz.open(src) as doc:
+                whole = _flattened(doc, 0, len(doc))
+        else:
+            whole = src.read_bytes()
+        res = ocr_pdf(whole)
         for r in _validate_results(res, len(PdfReader(str(src)).pages)):
             pages_md.append(r["markdown"]["text"])
             pages_pruned.append(r["prunedResult"])

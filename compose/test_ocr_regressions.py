@@ -255,6 +255,41 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(any('decoder' in c for c in chunks))
         self.assertTrue(any('0.950c' in c for c in chunks))
 
+    def test_a_rotated_cropped_page_is_rendered_upright_before_ocr(self):
+        """The layout model read less than half the text off a rotated, cropped scan."""
+        with tempfile.TemporaryDirectory() as td:
+            plain, awkward = Path(td)/'plain.pdf', Path(td)/'awkward.pdf'
+            with fitz.open() as doc:
+                page = doc.new_page(width=300, height=200)
+                page.insert_text((20, 40), 'content', fontsize=11)
+                doc.save(plain)
+            with fitz.open() as doc:
+                page = doc.new_page(width=300, height=200)
+                page.insert_text((20, 40), 'content', fontsize=11)
+                page.set_rotation(270)
+                page.set_cropbox(fitz.Rect(3, 3, 297, 197))
+                doc.save(awkward)
+
+            self.assertFalse(ocr.needs_flattening(plain))
+            self.assertTrue(ocr.needs_flattening(awkward))
+            # Only the awkward one records it, so untouched books keep their cache.
+            self.assertNotIn('ocr_input', ocr.source_identity(plain))
+            self.assertIn('ocr_input', ocr.source_identity(awkward))
+
+            start, chunk, total = next(iter(ocr.split_pdf(awkward, 1)))
+            self.assertEqual((start, total), (0, 1))
+            with fitz.open(stream=chunk, filetype='pdf') as sent, fitz.open(awkward) as original:
+                self.assertEqual(sent[0].rotation, 0)
+                self.assertEqual(tuple(sent[0].cropbox), tuple(sent[0].mediabox))
+                # The pixels handed over are the ones page.rect describes.
+                self.assertAlmostEqual(sent[0].rect.width, original[0].rect.width, delta=1)
+                self.assertAlmostEqual(sent[0].rect.height, original[0].rect.height, delta=1)
+
+            # A plain document is still passed through without re-rendering.
+            _, untouched, _ = next(iter(ocr.split_pdf(plain, 1)))
+            with fitz.open(stream=untouched, filetype='pdf') as sent:
+                self.assertIn('content', sent[0].get_text())
+
     def test_math_conversion_is_conservative(self):
         self.assertEqual(ocr.strip_html(r'$ 3 \times 8 $ decoder'), '3 × 8 decoder')
         for text in (r'$\frac{a}{b}$', r'$x_{1} \times y$', r'$x \unknown y$',
