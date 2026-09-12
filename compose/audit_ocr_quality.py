@@ -30,6 +30,7 @@ import argparse
 import json
 import re
 import sqlite3
+import sys
 from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -168,36 +169,27 @@ def sequence(pdf, first, last, copies):
             'total_shortfall': sum(c['expected'] - c['found'] for c in short)}
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('pdf', type=Path, help='the finished *_auto_searchable.pdf')
-    ap.add_argument('--cache', type=Path, help='matching *_line_ocr.sqlite3 (default: alongside)')
-    ap.add_argument('--pruned', type=Path, help='matching *_pruned.json (default: alongside)')
-    ap.add_argument('--items', default=None,
-                    help='numbered item range each copy must contain, e.g. 1-100; '
-                         'omit for a book with no numbered items')
-    ap.add_argument('--copies', type=int, default=1,
-                    help='how many times the book repeats the item range (e.g. 10 tests)')
-    ap.add_argument('--out', type=Path, help='write the report as JSON here')
-    args = ap.parse_args()
+def audit_one(pdf, cache=None, pruned=None, items=None, copies=1):
+    stem = pdf.name.split('_auto_')[0]
+    pruned = pruned or pdf.parent / f'{stem}_pruned.json'
+    cache = cache or pdf.parent / f'{stem}_line_ocr.sqlite3'
+    status_path = pdf.parent / f'{stem}_auto_status.json'
+    report = {'pdf': str(pdf), 'document': stem,
+              'coverage': coverage(pdf, pruned if Path(pruned).exists() else None)}
+    if items:
+        first, last = (int(v) for v in items.split('-'))
+        report['sequence'] = sequence(pdf, first, last, copies)
+    report['agreement'] = (agreement(cache) if Path(cache).exists()
+                           else {'skipped': f'no line cache at {cache}'})
+    try:
+        report['pipeline_status'] = json.loads(
+            status_path.read_text(encoding='utf-8')).get('status')
+    except (ValueError, OSError):
+        report['pipeline_status'] = None
+    return report
 
-    cache = args.cache
-    if cache is None:
-        stem = args.pdf.name.split('_auto_')[0]
-        cache = args.pdf.parent / f'{stem}_line_ocr.sqlite3'
-    stem = args.pdf.name.split('_auto_')[0]
-    pruned = args.pruned or args.pdf.parent / f'{stem}_pruned.json'
-    report = {'pdf': str(args.pdf),
-              'coverage': coverage(args.pdf, pruned if Path(pruned).exists() else None)}
-    if args.items:
-        first, last = (int(v) for v in args.items.split('-'))
-        report['sequence'] = sequence(args.pdf, first, last, args.copies)
-    if cache.exists():
-        report['agreement'] = agreement(cache)
-    else:
-        report['agreement'] = {'skipped': f'no line cache at {cache}'}
 
+def print_one(report, items=None, copies=1):
     cov = report['coverage']
     print(f"pages: {cov['pages']}, with no text at all "
           f"{len(cov['pages_without_any_text'])} {cov['pages_without_any_text'][:12]}")
@@ -210,20 +202,67 @@ def main():
         print('layout cache not found; skipped the uncovered-ink check')
     if 'sequence' in report:
         summary = report['sequence']
-        total = (last - first + 1) * args.copies
-        print(f"numbered items {first}-{last} x{args.copies}: "
+        first, last = (int(v) for v in items.split('-'))
+        total = (last - first + 1) * copies
+        print(f"numbered items {first}-{last} x{copies}: "
               f"{total - summary['total_shortfall']}/{total} occurrences found")
         for short in summary['items_short']:
             print(f"  item {short['item']}: found {short['found']} of {short['expected']}"
                   f"  pages {short['pages']}")
         if not summary['items_short']:
             print('  every expected item number is present')
-    if 'character_weighted_agreement' in report['agreement']:
-        a = report['agreement']
+    a = report['agreement']
+    if 'character_weighted_agreement' in a:
         print(f"two-model character agreement: {a['character_weighted_agreement']:.3f} "
               f"over {a['compared']} blocks   {a['bands']}")
         print('lowest-agreement pages: '
               + ', '.join(str(p['page']) for p in a['worst_pages']))
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('pdf', type=Path,
+                    help='a finished *_auto_searchable.pdf, or a folder holding several')
+    ap.add_argument('--cache', type=Path, help='matching *_line_ocr.sqlite3 (default: alongside)')
+    ap.add_argument('--pruned', type=Path, help='matching *_pruned.json (default: alongside)')
+    ap.add_argument('--items', default=None,
+                    help='numbered item range each copy must contain, e.g. 1-100; '
+                         'omit for a book with no numbered items')
+    ap.add_argument('--copies', type=int, default=1,
+                    help='how many times the book repeats the item range (e.g. 10 tests)')
+    ap.add_argument('--out', type=Path, help='write the report as JSON here')
+    args = ap.parse_args()
+
+    if args.pdf.is_dir():
+        found = sorted(args.pdf.glob('*_auto_searchable.pdf'))
+        if not found:
+            sys.exit(f'No finished searchable PDF in {args.pdf}')
+        reports = []
+        for pdf in found:
+            print()
+            print(f'=== {pdf.name}')
+            report = audit_one(pdf, items=args.items, copies=args.copies)
+            print_one(report, args.items, args.copies)
+            reports.append(report)
+        print()
+        print(f'{"document":44s} {"pages":>6s} {"blank":>6s} {"uncov":>6s} '
+              f'{"agree":>6s} {"short":>6s}  status')
+        for r in reports:
+            cov, a = r['coverage'], r['agreement']
+            agree = a.get('character_weighted_agreement')
+            short = r.get('sequence', {}).get('total_shortfall')
+            print(f"{r['document'][:44]:44s} {cov['pages']:6d} "
+                  f"{len(cov['pages_without_any_text']):6d} "
+                  f"{cov.get('uncovered_page_count', 0):6d} "
+                  f"{(f'{agree:.3f}' if agree is not None else '-'):>6s} "
+                  f"{(str(short) if short is not None else '-'):>6s}  "
+                  f"{r.get('pipeline_status')}")
+        report = {'documents': reports}
+    else:
+        report = audit_one(args.pdf, args.cache, args.pruned, args.items, args.copies)
+        print_one(report, args.items, args.copies)
+
     if args.out:
         ocr.atomic_json(args.out, report)
         print(f'[report] {args.out}')
