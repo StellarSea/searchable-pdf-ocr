@@ -238,3 +238,37 @@ VLM은 이 제한을 받지 않으므로 본문 문구 자체는 유지된다.
 `C:\ocr\models\official_models`에 받고, `compose.yaml`에 마운트를 추가한 뒤
 `line_ocr_server.py`의 `MODELS`에 항목을 넣고 `line_language`가 그 문자를 고르게 하면 된다.
 `LINE_ENGINE` 문자열도 함께 바꿔야 기존 캐시와 섞이지 않는다.
+
+## 여러 권을 한 번에 처리하기
+
+스캔한 PDF를 한 폴더에 모아두고 다음을 실행한다.
+
+```powershell
+python C:\ocr\compose\ocr_batch.py "C:\ocr\input"
+```
+
+문서마다 별도 프로세스로 돌기 때문에 한 권이 실패해도 나머지는 계속 처리한다.
+페이지 수가 적은 것부터 처리하므로 설정 문제가 있으면 가장 싼 문서에서 먼저 드러난다.
+로그는 `ocr_output/batch_logs/`에, 전체 결과는 `ocr_output/batch_status.json`에 남는다.
+
+같은 명령을 다시 실행하면 끝난 문서는 건너뛰고 실패한 문서만 다시 처리한다.
+문단 OCR 캐시가 남아 있으므로 재실행은 처음보다 훨씬 빠르다. 따라서 실패를 고친 뒤에는
+같은 명령을 한 번 더 실행하면 된다.
+
+권장 순서는 다음과 같다.
+
+1. `ocr_batch.py`로 폴더 전체를 처리한다.
+2. 실패한 문서가 있으면 원인을 고치고 같은 명령을 다시 실행한다.
+3. `audit_ocr_quality.py`에 폴더를 넘겨 전체 품질표를 확인한다.
+
+```powershell
+python C:\ocr\compose\audit_ocr_quality.py "C:\ocr\input\ocr_output"
+```
+
+### 스캔할 때 유의할 점
+
+인식 모델이 아는 문자만 나온다. 키릴 문자가 주인 책은 모델을 추가해야 한다.
+위 "어떤 글자를 읽을 수 있나"를 먼저 확인한다.
+
+검증에 실패하면 최종 PDF를 만들지 않고 `.partial.pdf`만 남긴다. 이는 설계된 동작이다.
+기존에 잘 만들어 둔 결과를 덮어쓰지 않기 위해서다. 실패 사유는 보고서에 남는다.
