@@ -1,0 +1,9 @@
+# Scanned sources and OCR products are large binaries, not source.
+input/
+output/
+models/
+**/ocr_output/
+__pycache__/
+*.pyc
+*.sqlite3
+*.lock

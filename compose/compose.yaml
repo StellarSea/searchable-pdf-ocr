@@ -1,0 +1,86 @@
+services:
+  paddleocr-line-api:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl:${API_IMAGE_TAG_SUFFIX}
+    container_name: paddleocr-line-api
+    ports:
+      - 8081:8081
+    shm_size: 4g
+    user: root
+    restart: unless-stopped
+    # The compact recognizer shares the GPU with the document model. It uses
+    # little VRAM and batches line crops instead of invoking the VLM per line.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    environment:
+      - PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+      - OMP_NUM_THREADS=8
+      - MKL_NUM_THREADS=8
+      - LINE_OCR_CPU_THREADS=8
+      - LINE_OCR_BATCH_SIZE=32
+      - LINE_OCR_DEVICE=gpu:0
+      - LINE_OCR_WORKERS=4
+      # Keep 320: the recognizer is trained around this width and measurably
+      # loses accuracy when short lines are padded out to a wider input (tried
+      # 768, which dropped Latin block acceptance from 93% to 86%). Long lines
+      # are handled by splitting at blank columns instead, never through glyphs.
+      - LINE_OCR_INPUT_WIDTH=320
+    volumes:
+      - ./line_ocr_server.py:/app/line_ocr_server.py:ro
+      - ../models/official_models/PP-OCRv5_mobile_rec:/models/PP-OCRv5_mobile_rec:ro
+      # The default dictionary has no Hangul; Korean lines use their own model.
+      - ../models/official_models/korean_PP-OCRv5_mobile_rec:/models/korean_PP-OCRv5_mobile_rec:ro
+    command: python /app/line_ocr_server.py
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      start_period: 60s
+
+  paddleocr-vl-api:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl:${API_IMAGE_TAG_SUFFIX}
+    container_name: paddleocr-vl-api
+    ports:
+      - 8080:8080
+    depends_on:
+      paddleocr-vlm-server:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    shm_size: 64g
+    # TODO: Allow using a regular user
+    user: root
+    restart: unless-stopped
+    environment:
+      - VLM_BACKEND=${VLM_BACKEND:-vllm}
+    command: /bin/bash -c "paddlex --serve --pipeline /home/paddleocr/pipeline_config_${VLM_BACKEND}.yaml"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+
+  paddleocr-vlm-server:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-${VLM_BACKEND}-server:${VLM_IMAGE_TAG_SUFFIX}
+    container_name: paddleocr-vlm-server
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    shm_size: 64g
+    # TODO: Allow using a regular user
+    user: root
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      start_period: 300s
+    volumes:
+      - ./vllm_config.yml:/home/paddleocr/vlm_server_config.yaml
+    command: paddleocr genai_server --model_name PaddleOCR-VL-1.6-0.9B --host 0.0.0.0 --port 8080 --backend vllm --backend_config /home/paddleocr/vlm_server_config.yaml
