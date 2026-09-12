@@ -358,3 +358,27 @@ class QualityAuditTests(unittest.TestCase):
             self.assertEqual(result['bands']['0.99+'], 1)
             self.assertEqual(result['bands']['under 0.90'], 1)
             self.assertLess(result['character_weighted_agreement'], 1.0)
+
+    def test_uncovered_ink_is_found_but_a_dark_background_is_not_ink(self):
+        """The real case: a divider page whose large numeral was never detected."""
+        import audit_ocr_quality as audit
+        with tempfile.TemporaryDirectory() as td:
+            src, pruned = Path(td)/'doc.pdf', Path(td)/'doc_pruned.json'
+            with fitz.open() as doc:
+                page = doc.new_page(width=300, height=300)
+                page.insert_text((20, 40), 'covered heading', fontsize=14)
+                page.insert_text((20, 200), '10', fontsize=90)   # never detected
+                dark = doc.new_page(width=300, height=300)
+                dark.draw_rect(dark.rect, color=(0.1, 0.1, 0.3), fill=(0.1, 0.1, 0.3))
+                dark.insert_text((20, 40), 'on a dark page', fontsize=14, color=(1, 1, 1))
+                doc.save(src)
+            # Layout that found the heading on each page and nothing else.
+            layout = [{'width': 300, 'height': 300, 'parsing_res_list': [
+                          {'block_content': 'covered heading', 'block_bbox': [15, 20, 200, 50]}]},
+                      {'width': 300, 'height': 300, 'parsing_res_list': [
+                          {'block_content': 'on a dark page', 'block_bbox': [15, 20, 200, 50]}]}]
+            ocr.atomic_json(pruned, layout)
+            result = audit.coverage(src, pruned)
+            flagged = {r['page'] for r in result['pages_with_uncovered_ink']}
+            self.assertIn(1, flagged)      # the undetected numeral
+            self.assertNotIn(2, flagged)   # a dark background is not missing text

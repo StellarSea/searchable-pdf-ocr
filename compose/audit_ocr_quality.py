@@ -12,6 +12,13 @@ agreement
     same way on the same bad scan, so read a low rate as "look here", not as an
     error rate.
 
+coverage
+    Needs nothing known about the book, so this is the check for an arbitrary
+    scan. It subtracts the detected layout blocks from the page's own ink and
+    reports what is left over, which is how a region the document model never
+    detected becomes visible. No later stage can see that, because they all
+    start from the blocks that were found.
+
 sequence
     A workbook numbers its items. Every number that the source must contain and
     the extracted text does not is a real defect: text was lost, mis-read, or
@@ -27,6 +34,7 @@ from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
+import numpy as np
 import pymupdf as fitz
 
 import ocr_to_searchable_pdf as ocr
@@ -63,6 +71,76 @@ def agreement(cache):
             'worst_pages': [{'page': p, 'lowest_block_agreement': round(r, 3)} for r, p in worst]}
 
 
+def coverage(pdf, pruned=None, zoom=0.5, edge=0.02, floor=0.12, contrast=40):
+    """Find ink the layout analysis never covered with a block.
+
+    This is the failure that hides on an arbitrary book: a sidebar, a second
+    column, a caption or a stamp that the document model simply did not detect.
+    Nothing downstream can notice, because every later stage starts from the
+    blocks that were found -- the pipeline's own character check compares the PDF
+    against the OCR text, not against the page. So the page pixels are consulted
+    directly here and the detected blocks are subtracted from them.
+
+    Ink is measured as local contrast rather than darkness, so a page printed on
+    a dark background does not read as ink from edge to edge. Ink within `edge`
+    of the border is ignored, which is where book scanning leaves dark margins.
+    A page is reported when more than `floor` of its ink falls outside every
+    block. Pictures do not trigger it: a photograph sits inside a detected image
+    block, so its ink counts as covered.
+    """
+    pages = json.loads(Path(pruned).read_text(encoding='utf-8')) if pruned else None
+    rows, flagged = [], []
+    with fitz.open(pdf) as doc:
+        for index in range(len(doc)):
+            page = doc[index]
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), colorspace=fitz.csGRAY,
+                                  alpha=False)
+            # Glyphs are local contrast, not darkness: a page printed on a dark
+            # background is not ink from edge to edge, and counting it as such
+            # reported every coloured page as a missed region.
+            gray = (np.frombuffer(pix.samples, dtype=np.uint8)
+                    .reshape(pix.height, pix.width).astype(np.int16))
+            mask = np.zeros(gray.shape, dtype=bool)
+            mask[:, :-1] |= np.abs(np.diff(gray, axis=1)) > contrast
+            mask[:-1, :] |= np.abs(np.diff(gray, axis=0)) > contrast
+            margin_y, margin_x = int(pix.height*edge), int(pix.width*edge)
+            if margin_y and margin_x:
+                mask[:margin_y], mask[-margin_y:] = False, False
+                mask[:, :margin_x], mask[:, -margin_x:] = False, False
+            total = int(mask.sum())
+            row = {'page': index + 1, 'ink': total,
+                   'characters': len(''.join(page.get_text().split()))}
+            if pages is not None and total:
+                blocks = pages[index].get('parsing_res_list', []) if index < len(pages) else []
+                size = ocr._find_size(pages[index]) if blocks else None
+                if size and size[0] and size[1]:
+                    sx = page.rect.width / size[0] * zoom
+                    sy = page.rect.height / size[1] * zoom
+                    for block in blocks:
+                        box = ocr._norm_bbox(block.get('block_bbox'))
+                        if not box:
+                            continue
+                        x0 = max(0, int(box[0]*sx) - 2); x1 = min(pix.width, int(box[2]*sx) + 3)
+                        y0 = max(0, int(box[1]*sy) - 2); y1 = min(pix.height, int(box[3]*sy) + 3)
+                        if x1 > x0 and y1 > y0:
+                            mask[y0:y1, x0:x1] = False
+                outside = int(mask.sum())
+                row['ink_outside_blocks'] = outside
+                row['fraction_outside'] = round(outside/total, 3)
+                row['blocks'] = len(blocks)
+                if total > 200 and outside/total > floor:
+                    flagged.append(row)
+            rows.append(row)
+    flagged.sort(key=lambda r: -r['fraction_outside'])
+    return {'pages': len(rows),
+            'pages_without_any_text': [r['page'] for r in rows if not r['characters']],
+            'checked_against_layout': pages is not None,
+            'pages_with_uncovered_ink': [
+                {k: r[k] for k in ('page', 'fraction_outside', 'ink', 'blocks', 'characters')}
+                for r in flagged[:40]],
+            'uncovered_page_count': len(flagged)}
+
+
 def sequence(pdf, first, last, copies):
     """Check each item number appears as often as the book must contain it.
 
@@ -95,34 +173,51 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('pdf', type=Path, help='the finished *_auto_searchable.pdf')
     ap.add_argument('--cache', type=Path, help='matching *_line_ocr.sqlite3 (default: alongside)')
-    ap.add_argument('--items', default='1-100',
-                    help='numbered item range each run must contain, e.g. 1-100')
+    ap.add_argument('--pruned', type=Path, help='matching *_pruned.json (default: alongside)')
+    ap.add_argument('--items', default=None,
+                    help='numbered item range each copy must contain, e.g. 1-100; '
+                         'omit for a book with no numbered items')
     ap.add_argument('--copies', type=int, default=1,
                     help='how many times the book repeats the item range (e.g. 10 tests)')
     ap.add_argument('--out', type=Path, help='write the report as JSON here')
     args = ap.parse_args()
 
-    first, last = (int(v) for v in args.items.split('-'))
     cache = args.cache
     if cache is None:
         stem = args.pdf.name.split('_auto_')[0]
         cache = args.pdf.parent / f'{stem}_line_ocr.sqlite3'
+    stem = args.pdf.name.split('_auto_')[0]
+    pruned = args.pruned or args.pdf.parent / f'{stem}_pruned.json'
     report = {'pdf': str(args.pdf),
-              'sequence': sequence(args.pdf, first, last, args.copies)}
+              'coverage': coverage(args.pdf, pruned if Path(pruned).exists() else None)}
+    if args.items:
+        first, last = (int(v) for v in args.items.split('-'))
+        report['sequence'] = sequence(args.pdf, first, last, args.copies)
     if cache.exists():
         report['agreement'] = agreement(cache)
     else:
         report['agreement'] = {'skipped': f'no line cache at {cache}'}
 
-    summary = report['sequence']
-    total = (last - first + 1) * args.copies
-    print(f"numbered items {first}-{last} x{args.copies}: "
-          f"{total - summary['total_shortfall']}/{total} occurrences found")
-    for short in summary['items_short']:
-        print(f"  item {short['item']}: found {short['found']} of {short['expected']}"
-              f"  pages {short['pages']}")
-    if not summary['items_short']:
-        print('  every expected item number is present')
+    cov = report['coverage']
+    print(f"pages: {cov['pages']}, with no text at all "
+          f"{len(cov['pages_without_any_text'])} {cov['pages_without_any_text'][:12]}")
+    if cov['checked_against_layout']:
+        print(f"pages with ink outside every detected block: {cov['uncovered_page_count']}")
+        for row in cov['pages_with_uncovered_ink'][:12]:
+            print(f"  p{row['page']}: {row['fraction_outside']*100:.0f}% of ink uncovered"
+                  f"  ({row['blocks']} blocks, {row['characters']} chars)")
+    else:
+        print('layout cache not found; skipped the uncovered-ink check')
+    if 'sequence' in report:
+        summary = report['sequence']
+        total = (last - first + 1) * args.copies
+        print(f"numbered items {first}-{last} x{args.copies}: "
+              f"{total - summary['total_shortfall']}/{total} occurrences found")
+        for short in summary['items_short']:
+            print(f"  item {short['item']}: found {short['found']} of {short['expected']}"
+                  f"  pages {short['pages']}")
+        if not summary['items_short']:
+            print('  every expected item number is present')
     if 'character_weighted_agreement' in report['agreement']:
         a = report['agreement']
         print(f"two-model character agreement: {a['character_weighted_agreement']:.3f} "

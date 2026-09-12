@@ -124,6 +124,16 @@ LINE_ENGINE = "PP-OCRv5_mobile_rec-gpu-320-w4-v2"
 # default string unchanged preserves every Latin crop already recognized.
 LINE_ENGINE_KOREAN = "korean_PP-OCRv5_mobile_rec-gpu-320-w4-v2"
 HANGUL_RE = re.compile(r'[가-힣]')
+# The Korean model reads Hangul but no CJK ideographs or kana; the default model
+# is the reverse. Latin, digits, Greek and maths symbols are in both, so only
+# these two scripts decide which model sees a block.
+CJK_RE = re.compile(r'[一-鿿㐀-䶿぀-ヿ]')
+
+
+def line_language(text):
+    """Pick the recognizer whose dictionary covers more of this block."""
+    plain = strip_html(text)
+    return 'korean' if len(HANGUL_RE.findall(plain)) > len(CJK_RE.findall(plain)) else None
 MD_SEP = "\n\n---PAGE---\n\n"
 
 FONT_CANDIDATES = [
@@ -970,7 +980,7 @@ class LineRefiner:
         # A block is one language in practice. The Korean model also carries the
         # Latin alphabet and digits, so mixed Korean/English blocks are safe on
         # it, while pure-Latin blocks stay on the better-tested default model.
-        lang = 'korean' if HANGUL_RE.search(strip_html(original)) else None
+        lang = line_language(original)
         engine = LINE_ENGINE_KOREAN if lang else LINE_ENGINE
         try:
             prepared = []
