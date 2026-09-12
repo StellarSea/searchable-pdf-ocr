@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -305,3 +306,55 @@ class RegressionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class QualityAuditTests(unittest.TestCase):
+    def pdf(self, path, pages):
+        with fitz.open() as doc:
+            for body in pages:
+                page = doc.new_page(width=300, height=400)
+                page.insert_text((20, 30), body, fontsize=9)
+            doc.save(path)
+
+    def test_unrelated_numbering_on_a_page_does_not_look_like_missing_items(self):
+        """A form printed as a question's graphic numbers its own fields from 1."""
+        import audit_ocr_quality as audit
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td)/'book.pdf'
+            self.pdf(src, ['1. first\n2. second\n3. third',
+                           '1. first\n2. second\n3. third',
+                           # a registration form restarts at 1 beside item 3
+                           '1. Name\n2. Street\n3. third'])
+            result = audit.sequence(src, 1, 3, copies=3)
+            self.assertEqual(result['items_short'], [])
+            self.assertEqual(result['total_shortfall'], 0)
+
+    def test_a_genuinely_missing_item_is_reported_with_its_pages(self):
+        import audit_ocr_quality as audit
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td)/'book.pdf'
+            self.pdf(src, ['1. first\n2. second\n3. third', '1. first\n3. third'])
+            result = audit.sequence(src, 1, 3, copies=2)
+            self.assertEqual([s['item'] for s in result['items_short']], [2])
+            self.assertEqual(result['items_short'][0]['pages'], [1])
+            self.assertEqual(result['total_shortfall'], 1)
+
+    def test_agreement_bands_and_blocks_without_recognizer_output(self):
+        import audit_ocr_quality as audit
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td)/'lines.sqlite3'
+            db = sqlite3.connect(path)
+            db.execute('CREATE TABLE decisions (id INTEGER PRIMARY KEY, value TEXT NOT NULL)')
+            rows = [{'page': 1, 'original': 'Exactly the same text here', 'candidate': ['Exactly the same text here']},
+                    {'page': 2, 'original': 'Completely different content', 'candidate': ['']},
+                    {'page': 3, 'original': 'abcdefghij', 'candidate': ['abcdefXYZj']}]
+            db.executemany('INSERT INTO decisions(value) VALUES (?)',
+                           [(json.dumps(r, ensure_ascii=False),) for r in rows])
+            db.commit(); db.close()
+            result = audit.agreement(path)
+            self.assertEqual(result['blocks'], 3)
+            self.assertEqual(result['compared'], 2)
+            self.assertEqual(result['bands']['no recognizer output'], 1)
+            self.assertEqual(result['bands']['0.99+'], 1)
+            self.assertEqual(result['bands']['under 0.90'], 1)
+            self.assertLess(result['character_weighted_agreement'], 1.0)
