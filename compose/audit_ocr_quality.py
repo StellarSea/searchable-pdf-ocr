@@ -27,6 +27,7 @@ sequence
     recognition fault, so they are counted separately.
 """
 import argparse
+import hashlib
 import json
 import re
 import sqlite3
@@ -169,9 +170,30 @@ def sequence(pdf, first, last, copies):
             'total_shortfall': sum(c['expected'] - c['found'] for c in short)}
 
 
+def layout_cache(pdf, stem):
+    """Find the layout cache this PDF was actually built from.
+
+    When a rerun's source or API settings no longer match, the pipeline keeps
+    the old cache and writes a verified one under .ocr_cache/<fingerprint>/.
+    Reading the stale file instead reports the previous run's layout, which is
+    exactly the mistake that made a fixed book look unchanged.
+    """
+    report = pdf.parent / f'{stem}_auto_report.json'
+    try:
+        identity = json.loads(report.read_text(encoding='utf-8'))['source_identity']
+        fingerprint = hashlib.sha256(
+            json.dumps(identity, sort_keys=True).encode()).hexdigest()[:20]
+        isolated = pdf.parent / '.ocr_cache' / fingerprint / 'pruned.json'
+        if isolated.exists():
+            return isolated
+    except (ValueError, OSError, KeyError):
+        pass
+    return pdf.parent / f'{stem}_pruned.json'
+
+
 def audit_one(pdf, cache=None, pruned=None, items=None, copies=1):
     stem = pdf.name.split('_auto_')[0]
-    pruned = pruned or pdf.parent / f'{stem}_pruned.json'
+    pruned = pruned or layout_cache(pdf, stem)
     cache = cache or pdf.parent / f'{stem}_line_ocr.sqlite3'
     status_path = pdf.parent / f'{stem}_auto_status.json'
     report = {'pdf': str(pdf), 'document': stem,

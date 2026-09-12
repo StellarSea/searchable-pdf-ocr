@@ -434,6 +434,31 @@ class QualityAuditTests(unittest.TestCase):
             self.assertEqual(result['items_short'][0]['pages'], [1])
             self.assertEqual(result['total_shortfall'], 1)
 
+    def test_the_audit_reads_the_layout_the_pdf_was_actually_built_from(self):
+        """A fixed book looked unchanged because the stale cache was audited."""
+        import hashlib
+        import json as _json
+        import audit_ocr_quality as audit
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            stem = 'book'
+            pdf = folder / f'{stem}_auto_searchable.pdf'
+            pdf.write_bytes(b'%PDF-1.4')
+            stale = folder / f'{stem}_pruned.json'
+            ocr.atomic_json(stale, [{'stale': True}])
+            # No report yet: fall back to the plain name.
+            self.assertEqual(audit.layout_cache(pdf, stem), stale)
+
+            identity = {'sha256': 'abc', 'api': 'x', 'ocr_input': 'flattened-2.0x'}
+            ocr.atomic_json(folder / f'{stem}_auto_report.json',
+                            {'source_identity': identity})
+            fingerprint = hashlib.sha256(
+                _json.dumps(identity, sort_keys=True).encode()).hexdigest()[:20]
+            isolated = folder / '.ocr_cache' / fingerprint / 'pruned.json'
+            isolated.parent.mkdir(parents=True)
+            ocr.atomic_json(isolated, [{'fresh': True}])
+            self.assertEqual(audit.layout_cache(pdf, stem), isolated)
+
     def test_agreement_bands_and_blocks_without_recognizer_output(self):
         import audit_ocr_quality as audit
         with tempfile.TemporaryDirectory() as td:
