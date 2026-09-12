@@ -255,9 +255,32 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(any('decoder' in c for c in chunks))
         self.assertTrue(any('0.950c' in c for c in chunks))
 
+    def test_math_becomes_characters_a_reader_would_search_for(self):
+        """The searchable layer wants "ΔV", not "\Delta V"."""
+        convert = ocr.searchable_math
+        self.assertEqual(convert(r'전압 $\Delta V$가'), '전압 ΔV가')
+        self.assertEqual(convert(r'$\mu_{0}I$'), 'μ₀I')
+        self.assertEqual(convert(r'$v^{2}=v_{0}^{2}+2a\Delta x$'), 'v²=v₀²+2aΔx')
+        self.assertEqual(convert(r'$\mathrm{\Delta t}$'), 'Δt')
+        self.assertEqual(convert(r'$\sin\theta$'), 'sinθ')
+        self.assertEqual(convert(r'$T=25^{\circ}C$'), 'T=25°C')
+        # An operator keeps the spacing around it; a letter does not.
+        self.assertEqual(convert(r'$a \leq b$'), 'a ≤ b')
+
+        # Anything not fully understood is handed back exactly as it came.
+        for untouched in (r'$R\equiv\frac{\Delta V}{I}$', r'$\overline{v}$',
+                          r'$\begin{aligned}x&=1\end{aligned}$'):
+            self.assertEqual(convert(untouched), untouched)
+        # A price is not mathematics.
+        self.assertEqual(convert('가격은 $100$ 달러'), '가격은 $100$ 달러')
+        # Script variants would stop a plain "x" from matching, so they are not used.
+        self.assertNotIn('𝓍', convert(r'$\mathcal{x}$'))
+
     def test_math_conversion_is_conservative(self):
         self.assertEqual(ocr.strip_html(r'$ 3 \times 8 $ decoder'), '3 × 8 decoder')
-        for text in (r'$\frac{a}{b}$', r'$x_{1} \times y$', r'$x \unknown y$',
+        # A subscript has a character of its own, so this one is now rewritten.
+        self.assertEqual(ocr.strip_html(r'$x_{1} \times y$'), 'x₁ × y')
+        for text in (r'$\frac{a}{b}$', r'$x \unknown y$',
                      r'Price $20 and $30', r'$$3 \times 8$$', r'\$3 \times 8$'):
             self.assertEqual(ocr.strip_html(text), text)
 

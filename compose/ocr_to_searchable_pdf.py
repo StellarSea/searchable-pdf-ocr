@@ -73,20 +73,87 @@ def text_units(text):
     return [" ".join(line.split()) for line in text.splitlines() if line.strip()]
 
 
+# Characters a reader would actually type into a search box. Mathematical
+# Alphanumeric Symbols (U+1D400 and up, the \ud835\udccd style) are deliberately absent:
+# nobody searches for them, and using one would stop a plain "x" from matching.
+MATH_SYMBOLS = {
+    'alpha': '\u03b1', 'beta': '\u03b2', 'gamma': '\u03b3', 'delta': '\u03b4', 'epsilon': '\u03b5',
+    'varepsilon': '\u03b5', 'zeta': '\u03b6', 'eta': '\u03b7', 'theta': '\u03b8', 'vartheta': '\u03d1',
+    'iota': '\u03b9', 'kappa': '\u03ba', 'lambda': '\u03bb', 'mu': '\u03bc', 'nu': '\u03bd', 'xi': '\u03be',
+    'rho': '\u03c1', 'sigma': '\u03c3', 'tau': '\u03c4', 'upsilon': '\u03c5', 'phi': '\u03c6',
+    'varphi': '\u03c6', 'chi': '\u03c7', 'psi': '\u03c8', 'omega': '\u03c9', 'pi': '\u03c0',
+    'Gamma': '\u0393', 'Delta': '\u0394', 'Theta': '\u0398', 'Lambda': '\u039b', 'Xi': '\u039e',
+    'Pi': '\u03a0', 'Sigma': '\u03a3', 'Upsilon': '\u03a5', 'Phi': '\u03a6', 'Psi': '\u03a8',
+    'Omega': '\u03a9', 'ell': '\u2113',
+}
+# A control word swallows the space that ends it, so "\Delta V" is one token.
+# That is right for a letter -- \u0394V is what a reader types into a search box --
+# but not for a binary operator, where "a \leq b" should stay "a \u2264 b".
+MATH_LETTERS = frozenset(MATH_SYMBOLS)
+MATH_SYMBOLS.update({
+    'times': '\u00d7', 'cdot': '\u00b7', 'pm': '\u00b1', 'mp': '\u2213', 'leq': '\u2264', 'le': '\u2264',
+    'geq': '\u2265', 'ge': '\u2265', 'neq': '\u2260', 'ne': '\u2260', 'approx': '\u2248', 'sim': '\u223c',
+    'equiv': '\u2261', 'propto': '\u221d', 'infty': '\u221e', 'circ': '\u00b0', 'degree': '\u00b0',
+    'oplus': '\u2295', 'otimes': '\u2297', 'ldots': '\u2026', 'dots': '\u2026', 'cdots': '\u2026',
+    'to': '\u2192', 'rightarrow': '\u2192', 'leftarrow': '\u2190', 'Rightarrow': '\u21d2',
+    'leftrightarrow': '\u2194', 'partial': '\u2202', 'nabla': '\u2207', 'sum': '\u2211',
+    'prod': '\u220f', 'int': '\u222b', 'sqrt': '\u221a', 'angle': '\u2220', 'perp': '\u22a5',
+    'parallel': '\u2225', 'in': '\u2208', 'subset': '\u2282', 'cup': '\u222a', 'cap': '\u2229',
+    'forall': '\u2200', 'exists': '\u2203', 'therefore': '\u2234', 'prime': '\u2032',
+})
+# Styling that carries no meaning a reader would search for.
+MATH_UNWRAP = ('mathrm', 'mathbf', 'mathit', 'mathsf', 'mathtt', 'text',
+               'textrm', 'textbf', 'boldsymbol', 'operatorname', 'left', 'right')
+MATH_FUNCTIONS = ('sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'sinh', 'cosh',
+                  'tanh', 'log', 'ln', 'exp', 'lim', 'max', 'min', 'det')
+SUPERSCRIPTS = str.maketrans('0123456789+-=()n', '\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u207a\u207b\u207c\u207d\u207e\u207f')
+SUBSCRIPTS = str.maketrans('0123456789+-=()', '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089\u208a\u208b\u208c\u208d\u208e')
+SAFE_RESULT_RE = re.compile(r'[^\\{}$^_]+')
+
+
+def _substitute_symbol(match):
+    name, trailing = match.group(1), match.group(2)
+    if name not in MATH_SYMBOLS:
+        return match.group(0)
+    return MATH_SYMBOLS[name] + ('' if name in MATH_LETTERS else trailing)
+
+
 def searchable_math(text):
-    """Convert only flat, recognized math; leave currency and complex TeX intact."""
-    symbols = {'times': '\u00d7', 'cdot': '\u00b7', 'pm': '\u00b1',
-               'leq': '\u2264', 'geq': '\u2265', 'neq': '\u2260'}
+    """Rewrite flat inline math as the characters a reader would type.
+
+    The searchable layer exists to be found, not to be valid TeX: "\u0394V" is what
+    someone types, "\\Delta V" is not. The raw markup stays in the Markdown and
+    the OCR cache, so nothing is lost by making this layer plainer.
+
+    Conversion stays all-or-nothing per expression. Anything left holding a
+    backslash, brace, caret or underscore is handed back untouched, so an
+    expression this does not fully understand is never half-rewritten.
+    """
 
     def convert(match):
         expr = match.group(1)
-        commands = re.findall(r'\\([A-Za-z]+)', expr)
-        if not commands or any(c not in symbols for c in commands):
+        # "$100$" in running text is a price, not mathematics. Require a real
+        # markup signal before touching anything between dollar signs.
+        if not re.search(r'\\[A-Za-z]|[\^_]', expr):
             return match.group(0)
-        plain = re.sub(r'\\([A-Za-z]+)', lambda m: symbols[m.group(1)], expr)
-        if not re.fullmatch(r'[A-Za-z0-9\s.+*/=()\-\u00d7\u00b7\u00b1\u2264\u2265\u2260]+', plain):
+        plain = expr
+        for _ in range(3):   # nested braces, e.g. \mathrm{\Delta t}
+            plain = re.sub(r'\\(?:' + '|'.join(MATH_UNWRAP) + r')\s*\{([^{}]*)\}',
+                           lambda m: m.group(1), plain)
+            plain = re.sub(r'\\(' + '|'.join(MATH_FUNCTIONS) + r')(?![A-Za-z])',
+                           lambda m: m.group(1), plain)
+            plain = re.sub(r'\^\{([0-9+\-=()n]+)\}',
+                           lambda m: m.group(1).translate(SUPERSCRIPTS), plain)
+            plain = re.sub(r'_\{([0-9+\-=()]+)\}',
+                           lambda m: m.group(1).translate(SUBSCRIPTS), plain)
+            plain = re.sub(r'\^([0-9n])', lambda m: m.group(1).translate(SUPERSCRIPTS), plain)
+            plain = re.sub(r'_([0-9])', lambda m: m.group(1).translate(SUBSCRIPTS), plain)
+            plain = re.sub(r'\\([A-Za-z]+)(?![A-Za-z])( ?)', _substitute_symbol, plain)
+            plain = re.sub(r'\^\{([°′])\}', lambda m: m.group(1), plain)
+        plain = plain.replace('\\,', ' ').replace('\\;', ' ').replace('\\ ', ' ')
+        if not SAFE_RESULT_RE.fullmatch(plain) or not plain.strip():
             return match.group(0)
-        return plain.strip()
+        return ' '.join(plain.split())
 
     return re.sub(r'(?<![\\$])\$(?!\$)([^$\n]+)\$(?!\$)', convert, text)
 
