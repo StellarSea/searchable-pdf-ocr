@@ -962,14 +962,34 @@ def insert_invisible_line(page, text, rect, fontname, fontobj, fallback_fonts):
             runs.append([chosen, char])
     width = sum(fo.text_length(s, fontsize=1) for (_, fo, _), s in runs)
     fs = min(rect.width / max(width, 0.01), rect.height * 1.35, 60.0)
+    # detect_lines trims the box to the ink, so the text has to span the whole
+    # box for every glyph to have a character under it. Where the ink is short
+    # and wide the height cap cut the size down and left the rest of the box
+    # empty -- a table cell reading "10001" carried text across half the cell,
+    # and a drag over the other half selected nothing, because a viewer finds
+    # no character there. Stretching sideways fills the box without growing the
+    # glyphs, which would otherwise reach into the lines above and below.
+    if rect.width > width * fs * 1.001 and not text[-1:].isspace():
+        # Table cell boxes butt against each other, so a run stretched over the
+        # whole box touches its neighbour and the two cells come back out of the
+        # PDF as one word. A trailing space rides along in the stretch and keeps
+        # them apart; it also gives the cell's padding a character of its own,
+        # so a drag crossing it stays selected.
+        runs[-1][1] += ' '
+        width = sum(fo.text_length(s, fontsize=1) for (_, fo, _), s in runs)
+    stretch = rect.width / max(width * fs, 0.01)
+    linear = lambda m: fitz.Matrix(m.a, m.b, m.c, m.d, 0, 0)
+    wider = (linear(page.rotation_matrix) * fitz.Matrix(stretch, 1)
+             * linear(page.derotation_matrix))
     x, y = rect.x0, rect.y1 - rect.height * 0.18
     for (name, fo, path), s in runs:
         if name != fontname:
             page.insert_font(fontname=name, fontfile=path)
         point = fitz.Point(x, y) * page.derotation_matrix
         page.insert_text(point, s, fontname=name, fontsize=fs, render_mode=3,
-                         rotate=page.rotation)
-        x += fo.text_length(s, fontsize=fs)
+                         rotate=page.rotation,
+                         morph=(point, wider) if stretch > 1.001 else None)
+        x += fo.text_length(s, fontsize=fs) * stretch
 
 
 def line_refinement_is_safe(original, candidates):

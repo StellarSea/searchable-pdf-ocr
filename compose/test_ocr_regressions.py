@@ -331,6 +331,38 @@ class RegressionTests(unittest.TestCase):
             self.assertAlmostEqual(xs.min()/zoom, ink.x0, delta=2.0)
             self.assertAlmostEqual(ys.min()/zoom, ink.y0, delta=2.0)
 
+    def test_short_text_in_a_wide_box_still_covers_it(self):
+        """Every glyph needs a character under it, or a drag over it lets go."""
+        for rotation in (0, 90, 180, 270):
+            with self.subTest(rotation=rotation), fitz.open() as doc:
+                page = doc.new_page(width=400, height=300)
+                page.set_rotation(rotation)
+                name, path, fontobj = ocr.pick_font(doc)
+                # A table cell: the box is as wide as the column, the ink in it
+                # is a few digits tall. Sizing the text by height alone left the
+                # rest of the cell with no character in it at all.
+                box = fitz.Rect(20, 40, 20 + page.rect.width * 0.5, 47)
+                ocr.insert_invisible_line(page, '10001', box, name, fontobj, [])
+
+                boxes = []
+                for b in page.get_text('rawdict')['blocks']:
+                    for l in b.get('lines', []):
+                        for s in l.get('spans', []):
+                            for c in s.get('chars', []):
+                                if not c['c'].strip():
+                                    continue
+                                r = fitz.Rect(c['bbox']) * page.rotation_matrix
+                                r.normalize()
+                                boxes.append(r)
+                self.assertTrue(boxes, 'nothing was inserted')
+                covered = max(r.x1 for r in boxes) - min(r.x0 for r in boxes)
+                self.assertGreater(covered, box.width * 0.85,
+                                   'the text stops short of the box it fills')
+                # Stretching must not make the glyphs tall enough to reach the
+                # lines above and below.
+                height = max(r.y1 for r in boxes) - min(r.y0 for r in boxes)
+                self.assertLess(height, box.height * 2.6)
+
     def test_math_conversion_is_conservative(self):
         self.assertEqual(ocr.strip_html(r'$ 3 \times 8 $ decoder'), '3 × 8 decoder')
         for text in (r'$\frac{a}{b}$', r'$x_{1} \times y$', r'$x \unknown y$',
@@ -403,8 +435,10 @@ class RegressionTests(unittest.TestCase):
                 trace = page.get_texttrace()[0]
                 self.assertEqual(trace['type'],3)
                 origin=fitz.Point(trace['chars'][0][2])*page.rotation_matrix
-                self.assertAlmostEqual(origin.x,rect.x0,places=3)
-                self.assertAlmostEqual(origin.y,rect.y1-rect.height*0.18,places=3)
+                # A stretched line carries a matrix of its own, and the round
+                # trip through it costs a thousandth of a point.
+                self.assertAlmostEqual(origin.x,rect.x0,delta=0.01)
+                self.assertAlmostEqual(origin.y,rect.y1-rect.height*0.18,delta=0.01)
 
     def test_fallback_font_preserves_checkbox(self):
         path=Path(r'C:\Windows\Fonts\seguisym.ttf')
