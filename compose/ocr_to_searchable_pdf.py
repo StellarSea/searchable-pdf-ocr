@@ -1197,7 +1197,7 @@ def overlay(
     fallback_fonts.append(("japan", fitz.Font("japan"), None))
 
     lines_ok = para_fallback = skipped = 0
-    empty_boxes = 0
+    empty_boxes = textless_blocks = 0
     report = {'pages': [], 'mode':'automatic' if automatic else 'legacy'}
     count = lambda text: Counter(c for c in text if not c.isspace())
 
@@ -1210,6 +1210,7 @@ def overlay(
                 'existing_text':bool(existing.strip())}
         report['pages'].append(info)
         start_lines, start_empty, start_para, start_skip = lines_ok, empty_boxes, para_fallback, skipped
+        start_textless = textless_blocks
         if automatic:
             print(f'[overlay] page {pno+1}/{len(doc)}', flush=True)
             if existing.strip():
@@ -1247,17 +1248,20 @@ def overlay(
                 text = text.replace(REPLACEMENT_CHAR, '')
             info['expected_characters'].update(count(strip_html(text)))
             rect = fitz.Rect(x0 * sx, y0 * sy, x1 * sx, y1 * sy) & page.rect
-            if rect.is_empty or rect.height < 1 or rect.width < 1:
-                skipped += 1
-                info['warnings'].append('insertion_failed')
-                continue
 
             structured_text = text
             if HTML_TAG_RE.search(text) or '\\' in text:
                 info['warnings'].append('complex_structure')
             text = strip_html(text)
             if not text.strip():
+                # A block holding only an image or markup has nothing to insert.
+                # That is not a failure, and counting it as one threw away a
+                # finished 392-page book over one picture inside a table cell.
+                textless_blocks += 1
+                continue
+            if rect.is_empty or rect.height < 1 or rect.width < 1:
                 skipped += 1
+                info['warnings'].append('insertion_failed')
                 continue
 
             line_rects = [] if paragraph_mode else detect_lines(page, rect)
@@ -1329,6 +1333,8 @@ def overlay(
             page.draw_rect(lr * page.derotation_matrix, color=(1, 0, 0), width=0.4)
         info['inserted_lines'] = lines_ok-start_lines
         info['unassigned_boxes'] = empty_boxes-start_empty
+        if textless_blocks > start_textless:
+            info['textless_blocks'] = textless_blocks-start_textless
         if empty_boxes > start_empty:
             info['warnings'].append('unassigned_boxes')
         if para_fallback > start_para:

@@ -148,6 +148,27 @@ class RegressionTests(unittest.TestCase):
             self.assertNotIn('�', extracted)
             self.assertIn('ab', ''.join(extracted.split()))
 
+    def test_a_table_cell_holding_only_a_picture_is_not_an_insertion_failure(self):
+        """This discarded a finished 392-page book over one image in a table."""
+        import ocr_workflow
+        with tempfile.TemporaryDirectory() as td:
+            src, out = Path(td)/'in.pdf', Path(td)/'out.pdf'
+            with fitz.open() as doc:
+                doc.new_page(width=300, height=200)
+                doc.save(src)
+            pruned = {'width': 300, 'height': 200, 'parsing_res_list': [
+                {'block_content': '14 BCD-to-10 디코더를 설계하시오.', 'block_bbox': [20, 20, 280, 44]},
+                {'block_content': '<table><tr><td><img src="imgs/img_1.jpg"></td></tr></table>',
+                 'block_bbox': [20, 60, 280, 170]}]}
+            report = ocr.overlay(src, [pruned], out, automatic=True)
+            page = report['pages'][0]
+            self.assertNotIn('insertion_failed', page['warnings'])
+            self.assertEqual(page.get('textless_blocks'), 1)
+            ocr_workflow.verify(src, out, report)
+            self.assertFalse(report['validation_failed'])
+            with fitz.open(out) as doc:
+                self.assertIn('디코더', doc[0].get_text())
+
     def test_disagreement_warning_ignores_near_matches_but_not_changed_digits(self):
         text = 'Call 02-2285-1523 for the Official TOEIC prep books in Korea today.'
         self.assertFalse(ocr.recognition_disagrees(text, [text]))
