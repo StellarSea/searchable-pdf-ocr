@@ -2,6 +2,7 @@ import base64
 import contextlib
 import io
 import json
+from collections import Counter
 import tempfile
 import unittest
 from pathlib import Path
@@ -151,6 +152,35 @@ class AutomaticTests(unittest.TestCase):
                 self.assertEqual(len(doc),300)
             self.run_cli(src,lambda *a,**kw: self.fail('Unexpected API call on cached repeat'),
                          lambda *a,**kw: self.fail('Unexpected line OCR call on cached repeat'))
+
+    def test_a_font_swapping_one_glyph_codepoint_does_not_fail_the_book(self):
+        """A wave dash read back as a fullwidth tilde discarded a 216-page book."""
+        with tempfile.TemporaryDirectory() as td:
+            src, out = Path(td)/'in.pdf', Path(td)/'out.pdf'
+            with fitz.open() as doc:
+                doc.new_page(width=200, height=80)
+                doc.save(src)
+            with fitz.open(src) as doc:
+                page = doc[0]
+                page.insert_font(fontname='malgun', fontfile=r'C:\Windows\Fonts\malgun.ttf')
+                page.insert_text((10, 40), '3～5', fontname='malgun', render_mode=3)
+                doc.save(out)
+
+            report = {'pages': [{'page': 1, 'warnings': [],
+                                 'expected_characters': Counter('3〜5')}]}
+            ocr_workflow.verify(src, out, report, debug=True)
+            page_report = report['pages'][0]
+            self.assertNotIn('extracted_text_mismatch', page_report['warnings'])
+            self.assertIn('glyph_equivalent_substituted', page_report['warnings'])
+            self.assertFalse(report['validation_failed'])
+
+            # A character that really went missing must still be fatal.
+            report = {'pages': [{'page': 1, 'warnings': [],
+                                 'expected_characters': Counter('3〜58')}]}
+            ocr_workflow.verify(src, out, report, debug=True)
+            self.assertIn('extracted_text_mismatch', report['pages'][0]['warnings'])
+            self.assertEqual(report['pages'][0]['missing'], {'8': 1})
+            self.assertTrue(report['validation_failed'])
 
     def test_debug_run_keeps_its_own_status_and_report(self):
         """A diagnostic run must not overwrite the finished PDF's status."""

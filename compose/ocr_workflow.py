@@ -124,6 +124,20 @@ class Service:
         raise RuntimeError('OCR pipeline did not recover within 3 minutes; rerun to resume')
 
 
+# Fonts encode both members of these pairs to one glyph, so text read back out
+# of the PDF reports whichever the font chose. The content is the same; only the
+# codepoint differs. Without folding them a handful of tildes discards a whole
+# finished book, which is a worse outcome than the difference itself.
+GLYPH_EQUIVALENTS = {'〜': '～'}   # wave dash -> fullwidth tilde
+
+
+def fold_equivalents(counter):
+    folded = Counter()
+    for char, number in counter.items():
+        folded[GLYPH_EQUIVALENTS.get(char, char)] += number
+    return folded
+
+
 def verify(source, output, report, debug=False):
     count = lambda s: Counter(c for c in s if not c.isspace())
     with fitz.open(source) as original, fitz.open(output) as result:
@@ -140,9 +154,17 @@ def verify(source, output, report, debug=False):
             expected = Counter(info.pop('expected_characters'))
             actual = count(result[pi].get_text())
             if expected != actual:
-                info['warnings'].append('extracted_text_mismatch')
-                info['missing'] = dict(expected-actual)
-                info['extra'] = dict(actual-expected)
+                folded_expected, folded_actual = (fold_equivalents(expected),
+                                                  fold_equivalents(actual))
+                if folded_expected == folded_actual:
+                    # Same text, different codepoint for the same glyph. Say so,
+                    # because searching for the original codepoint will miss it.
+                    info['warnings'].append('glyph_equivalent_substituted')
+                    info['substituted'] = dict(expected - actual)
+                else:
+                    info['warnings'].append('extracted_text_mismatch')
+                    info['missing'] = dict(folded_expected - folded_actual)
+                    info['extra'] = dict(folded_actual - folded_expected)
             if '\x00' in result[pi].get_text():
                 info['warnings'].append('nul_character')
             if (not info.get('existing_text') and
@@ -168,6 +190,7 @@ def write_summary(path, report):
               'no_ocr_text':'인식된 텍스트 없음: 공백/그림/누락 여부 확인',
               'existing_text_preserved':'기존 텍스트 보존: 중복 삽입 생략'}
     labels['ocr_disagreement_content_preserved'] = '줄 인식 문구가 다름: 기존 문구 보존, 원본 대조 필요'
+    labels['glyph_equivalent_substituted'] = '같은 글리프의 다른 코드포인트로 기록됨: 내용 동일, 검색어 주의'
     for p in report.get('pages', []):
         if p['warnings']:
             lines.append(f"- {p['page']}페이지: "+', '.join(labels.get(w,w) for w in sorted(set(p['warnings']))))
