@@ -182,6 +182,26 @@ class AutomaticTests(unittest.TestCase):
             self.assertEqual(report['pages'][0]['missing'], {'8': 1})
             self.assertTrue(report['validation_failed'])
 
+    def test_batch_forwards_flags_and_tracks_debug_runs_separately(self):
+        """--debug-lines on a folder used to skip every already-processed book."""
+        import ocr_batch
+        self.assertEqual(ocr_batch.status_tag([]), '_auto')
+        self.assertEqual(ocr_batch.status_tag(['--debug-lines']), '_auto_debug')
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td)/'book.pdf'
+            self.scanned(src, 1)
+            out = src.parent/'ocr_output'
+            out.mkdir()
+            ocr.atomic_json(out/'book_cache_meta.json', ocr.source_identity(src))
+            final = out/'book_auto_searchable.pdf'
+            final.write_bytes(b'%PDF-1.4')
+            ocr.atomic_json(out/'book_auto_status.json',
+                            {'status': 'completed', 'output': str(final)})
+            # The normal run is finished, so a normal batch skips it...
+            self.assertTrue(ocr_batch.finished(src, out, '_auto'))
+            # ...but a debug run has not happened and must not be skipped.
+            self.assertFalse(ocr_batch.finished(src, out, '_auto_debug'))
+
     def test_debug_run_keeps_its_own_status_and_report(self):
         """A diagnostic run must not overwrite the finished PDF's status."""
         with tempfile.TemporaryDirectory() as td:

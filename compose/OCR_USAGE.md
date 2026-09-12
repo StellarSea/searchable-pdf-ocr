@@ -251,6 +251,18 @@ python C:\ocr\compose\ocr_batch.py "C:\ocr\input"
 페이지 수가 적은 것부터 처리하므로 설정 문제가 있으면 가장 싼 문서에서 먼저 드러난다.
 로그는 `ocr_output/batch_logs/`에, 전체 결과는 `ocr_output/batch_status.json`에 남는다.
 
+이 스크립트가 모르는 옵션은 그대로 각 문서의 실행에 넘긴다. 예를 들어 `--debug-lines`,
+`--fast`, `--no-cache`, `--batch 5`를 폴더 단위로 쓸 수 있다.
+
+```powershell
+python C:\ocr\compose\ocr_batch.py "C:\ocr\input" --debug-lines
+```
+
+`--debug-lines`는 일반 실행과 별개로 취급한다. 상태와 보고서, 배치 요약이 각각
+`_auto_debug_status.json`, `_auto_debug_report.json`, `batch_status_debug.json`으로
+따로 기록되므로, 일반 실행이 이미 끝난 폴더에서도 건너뛰지 않고 테두리 확인본을 만든다.
+반대로 일반 실행은 테두리 확인본이 있어도 영향을 받지 않는다.
+
 같은 명령을 다시 실행하면 끝난 문서는 건너뛰고 실패한 문서만 다시 처리한다.
 문단 OCR 캐시가 남아 있으므로 재실행은 처음보다 훨씬 빠르다. 따라서 실패를 고친 뒤에는
 같은 명령을 한 번 더 실행하면 된다.

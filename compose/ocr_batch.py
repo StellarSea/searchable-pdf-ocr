@@ -30,9 +30,18 @@ def pages_of(path):
         return 0
 
 
-def finished(src, out_dir):
-    """True when a previous run of this exact source completed."""
-    status_path = out_dir / f'{src.stem}_auto_status.json'
+def status_tag(extra):
+    """Name the status file the way the pipeline itself will.
+
+    A --debug-lines run writes its own status, so asking about the normal one
+    would skip every document that had already been processed normally.
+    """
+    return ocr.auto_tag(argparse.Namespace(debug_lines='--debug-lines' in extra))
+
+
+def finished(src, out_dir, tag='_auto'):
+    """True when a previous run of this exact source, in this mode, completed."""
+    status_path = out_dir / f'{src.stem}{tag}_status.json'
     if not status_path.exists():
         return False
     try:
@@ -46,8 +55,8 @@ def finished(src, out_dir):
             and identity == ocr.source_identity(src))
 
 
-def run_one(src, out_dir, log_dir, extra):
-    log = log_dir / f'{src.stem}.log'
+def run_one(src, out_dir, log_dir, extra, tag='_auto'):
+    log = log_dir / f'{src.stem}{"" if tag == "_auto" else ".debug"}.log'
     command = [sys.executable, str(Path(__file__).parent / 'ocr_to_searchable_pdf.py'),
                str(src), *extra]
     started = time.time()
@@ -56,7 +65,7 @@ def run_one(src, out_dir, log_dir, extra):
     elapsed = time.time() - started
     status = 'failed'
     review = None
-    path = out_dir / f'{src.stem}_auto_status.json'
+    path = out_dir / f'{src.stem}{tag}_status.json'
     if path.exists():
         try:
             recorded = json.loads(path.read_text(encoding='utf-8'))
@@ -90,6 +99,7 @@ def main():
            'size': lambda p: p.stat().st_size}[args.order]
     sources.sort(key=key)
 
+    tag = status_tag(extra)
     log_dir = args.folder / 'ocr_output' / 'batch_logs'
     log_dir.mkdir(parents=True, exist_ok=True)
     results = []
@@ -98,13 +108,13 @@ def main():
         out_dir = args.out.resolve() if args.out else src.parent / 'ocr_output'
         out_dir.mkdir(parents=True, exist_ok=True)
         head = f'[batch {index}/{total}] {src.name} ({pages_of(src)}p)'
-        if not args.redo and finished(src, out_dir):
+        if not args.redo and finished(src, out_dir, tag):
             print(f'{head} already finished; skipping', flush=True)
             results.append({'source': src.name, 'pages': pages_of(src),
                             'status': 'skipped', 'exit_code': 0, 'seconds': 0.0})
             continue
         print(f'{head} starting', flush=True)
-        result = run_one(src, out_dir, log_dir, extra)
+        result = run_one(src, out_dir, log_dir, extra, tag)
         print(f'{head} -> {result["status"]} in {result["seconds"]}s'
               + (f', {result["review_pages"]} pages flagged' if result['review_pages'] is not None else '')
               + (f' (see {result["log"]})' if result['status'] == 'failed' else ''), flush=True)
@@ -113,7 +123,7 @@ def main():
             print('[batch] stopping after a failure as requested', flush=True)
             break
 
-    summary = log_dir.parent / 'batch_status.json'
+    summary = log_dir.parent / f'batch_status{"" if tag == "_auto" else "_debug"}.json'
     ocr.atomic_json(summary, {'finished': time.time(), 'documents': results})
     print('\n[batch] summary')
     for r in results:
