@@ -124,6 +124,7 @@ LINE_ENGINE = "PP-OCRv5_mobile_rec-gpu-320-w4-v2"
 # separate model. Each engine string keys its own crop cache; keeping the
 # default string unchanged preserves every Latin crop already recognized.
 LINE_ENGINE_KOREAN = "korean_PP-OCRv5_mobile_rec-gpu-320-w4-v2"
+REPLACEMENT_CHAR = '�'
 HANGUL_RE = re.compile(r'[가-힣]')
 # The Korean model reads Hangul but no CJK ideographs or kana; the default model
 # is the reverse. Latin, digits, Greek and maths symbols are in both, so only
@@ -1234,6 +1235,16 @@ def overlay(
             sx, sy = page.rect.width / mx, page.rect.height / my
 
         for text, (x0, y0, x1, y1) in blocks:
+            # U+FFFD is not a character the book contains; it is the marker for
+            # one recognition could not represent. Carrying it into the text
+            # layer adds something nobody can search for, and no font maps it
+            # back to itself, so it also reads out as an unrelated glyph.
+            if REPLACEMENT_CHAR in text:
+                info.setdefault('undecodable_characters', 0)
+                info['undecodable_characters'] += text.count(REPLACEMENT_CHAR)
+                if 'undecodable_character_dropped' not in info['warnings']:
+                    info['warnings'].append('undecodable_character_dropped')
+                text = text.replace(REPLACEMENT_CHAR, '')
             info['expected_characters'].update(count(strip_html(text)))
             rect = fitz.Rect(x0 * sx, y0 * sy, x1 * sx, y1 * sy) & page.rect
             if rect.is_empty or rect.height < 1 or rect.width < 1:

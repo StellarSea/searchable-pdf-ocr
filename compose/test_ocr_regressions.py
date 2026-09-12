@@ -127,6 +127,27 @@ class RegressionTests(unittest.TestCase):
             for char in text:
                 self.assertIn(char, extracted, f'U+{ord(char):04X} was dropped')
 
+    def test_the_replacement_character_is_not_carried_into_the_text_layer(self):
+        """U+FFFD marks text recognition could not represent, and reads back as CJK."""
+        with tempfile.TemporaryDirectory() as td:
+            src, out = Path(td)/'in.pdf', Path(td)/'out.pdf'
+            with fitz.open() as doc:
+                doc.new_page(width=300, height=120)
+                doc.save(src)
+            pruned = {'width': 300, 'height': 120, 'parsing_res_list': [
+                {'block_content': 'ab�cd�', 'block_bbox': [20, 20, 280, 60]}]}
+            report = ocr.overlay(src, [pruned], out, automatic=True)
+            page = report['pages'][0]
+            self.assertIn('undecodable_character_dropped', page['warnings'])
+            self.assertEqual(page['undecodable_characters'], 2)
+            import ocr_workflow
+            ocr_workflow.verify(src, out, report)
+            self.assertFalse(report['validation_failed'])
+            with fitz.open(out) as doc:
+                extracted = doc[0].get_text()
+            self.assertNotIn('�', extracted)
+            self.assertIn('ab', ''.join(extracted.split()))
+
     def test_disagreement_warning_ignores_near_matches_but_not_changed_digits(self):
         text = 'Call 02-2285-1523 for the Official TOEIC prep books in Korea today.'
         self.assertFalse(ocr.recognition_disagrees(text, [text]))

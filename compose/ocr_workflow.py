@@ -191,6 +191,7 @@ def write_summary(path, report):
               'existing_text_preserved':'기존 텍스트 보존: 중복 삽입 생략'}
     labels['ocr_disagreement_content_preserved'] = '줄 인식 문구가 다름: 기존 문구 보존, 원본 대조 필요'
     labels['glyph_equivalent_substituted'] = '같은 글리프의 다른 코드포인트로 기록됨: 내용 동일, 검색어 주의'
+    labels['undecodable_character_dropped'] = '인식이 표현하지 못한 자리 표시 문자 제외: 해당 글자는 원본 확인 필요'
     for p in report.get('pages', []):
         if p['warnings']:
             lines.append(f"- {p['page']}페이지: "+', '.join(labels.get(w,w) for w in sorted(set(p['warnings']))))
