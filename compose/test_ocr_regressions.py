@@ -109,6 +109,24 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(ocr.snap_out_of_latin_token('the business repair', 12), 12)
         self.assertEqual(ocr.snap_out_of_latin_token('English-language', 8), 8)
 
+    def test_a_character_outside_the_book_scripts_does_not_throw_away_the_book(self):
+        """These four came out of a Korean physics scan and failed every fallback."""
+        with fitz.open() as doc:
+            page = doc.new_page()
+            name, path, fontobj = ocr.pick_font(doc)
+            fallbacks = []
+            for label, file in (('ocrcjk', r'C:\Windows\Fonts\simsun.ttc'),
+                                ('ocrsymbol', r'C:\Windows\Fonts\seguisym.ttf')):
+                if Path(file).exists():
+                    fallbacks.append((label, fitz.Font(fontfile=file), file))
+            text = 'xᴇᵍใ₹'
+            self.assertFalse(all(fontobj.has_glyph(ord(c)) for c in text))
+            ocr.insert_invisible_line(page, text, fitz.Rect(20, 20, 260, 44),
+                                      name, fontobj, fallbacks)
+            extracted = ''.join(page.get_text().split())
+            for char in text:
+                self.assertIn(char, extracted, f'U+{ord(char):04X} was dropped')
+
     def test_disagreement_warning_ignores_near_matches_but_not_changed_digits(self):
         text = 'Call 02-2285-1523 for the Official TOEIC prep books in Korea today.'
         self.assertFalse(ocr.recognition_disagrees(text, [text]))

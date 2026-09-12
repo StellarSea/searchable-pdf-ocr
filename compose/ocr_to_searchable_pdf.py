@@ -26,6 +26,7 @@ import base64
 import html as _html
 import io
 import json
+import os
 import re
 import sys
 import time
@@ -872,12 +873,50 @@ def fit_size(fontobj, text, rect):
     return max(1.0, min(fs, rect.height * 1.35, 60.0))
 
 
+_INSTALLED_FONTS = None
+_FONT_FOR_CODEPOINT = {}
+
+
+def font_for_codepoint(code):
+    """Search every installed font for a glyph, once per codepoint.
+
+    Recognition sometimes returns a character that belongs to no script in the
+    book at all -- a Thai vowel or a rupee sign misread from a Korean physics
+    page. Insertion failure is fatal by design, so without this a single such
+    character throws away a whole finished book. The glyph almost always exists
+    in some installed font, so the text is kept rather than the run discarded.
+    """
+    if code in _FONT_FOR_CODEPOINT:
+        return _FONT_FOR_CODEPOINT[code]
+    global _INSTALLED_FONTS
+    if _INSTALLED_FONTS is None:
+        directories = [Path(os.environ.get('SystemRoot', r'C:\Windows'))/'Fonts',
+                       Path(os.environ.get('LOCALAPPDATA', ''))/'Microsoft/Windows/Fonts']
+        _INSTALLED_FONTS = sorted({p for d in directories if d.is_dir()
+                                   for p in d.glob('*.tt*')})
+    found = None
+    for path in _INSTALLED_FONTS:
+        try:
+            candidate = fitz.Font(fontfile=str(path))
+            if candidate.has_glyph(code):
+                found = (f'ocrx{code:04x}', candidate, str(path))
+                break
+        except Exception:
+            continue
+    if found:
+        print(f'[font] U+{code:04X} taken from {Path(found[2]).name}', flush=True)
+    _FONT_FOR_CODEPOINT[code] = found
+    return found
+
+
 def insert_invisible_line(page, text, rect, fontname, fontobj, fallback_fonts):
     runs = []
     for char in text:
         chosen = (fontname, fontobj, None)
         if not char.isspace() and not fontobj.has_glyph(ord(char)):
             chosen = next((f for f in fallback_fonts if f[1].has_glyph(ord(char))), None)
+            if chosen is None:
+                chosen = font_for_codepoint(ord(char))
             if chosen is None:
                 raise ValueError(f"No font for U+{ord(char):04X}")
         if runs and runs[-1][0] == chosen:
