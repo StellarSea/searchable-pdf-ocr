@@ -83,6 +83,14 @@ TIFF의 가로·세로 DPI로 페이지 물리 크기를 계산하고 원래 프
 
 코드는 `compose/`, 오프라인 회귀 테스트는 `tests/`, 수동 검증·벤치마크 도구는 `tools/`에 있습니다. `tools/`의 OCR 벤치마크는 실제 서비스를 호출할 수 있으며 자동 테스트와 구분됩니다. GitHub Actions는 Windows/Python 3.13에서 오프라인 검사만 실행하도록 구성했습니다.
 
-## 라이선스 상태
+## 라이선스
 
-프로젝트 자체 라이선스는 아직 선택 전입니다. 의존성인 PyMuPDF는 **AGPL-3.0 또는 Artifex 상용 라이선스**로 제공됩니다. 자체 코드의 MIT/Apache 선택만으로 이 의존성의 조건이 사라지지 않습니다. 선택지와 패키지별 근거는 [라이선스 조사](docs/DEPENDENCIES.md)를 확인하세요. 모델·폰트·입력 문서에는 각자의 권리와 배포 조건이 적용됩니다.
+Copyright (c) 2026 Searchable PDF OCR contributors.
+
+별도 고지가 없는 프로젝트 자체 코드와 문서는 **GNU Affero General Public License v3.0**
+([AGPL-3.0-only](LICENSE))으로 제공합니다. 이 프로젝트의 허가는 버전 3에 적용됩니다.
+라이선스의 조건에 따라 사용·수정·배포할 수 있으며, 어떠한 보증도 제공하지 않습니다.
+
+제3자 라이브러리·모델·폰트·입력 문서에는 각자의 권리와 배포 조건이 적용됩니다.
+의존성인 PyMuPDF의 AGPL/상용 조건과 패키지별 근거는
+[의존성 라이선스 조사](docs/DEPENDENCIES.md)를 확인하세요.
