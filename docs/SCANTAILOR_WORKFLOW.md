@@ -10,8 +10,7 @@ Advanced는 페이지 보정을 담당하고, PDF 합성과 OCR은 이 프로젝
 
 Windows 배포 파일이 있는 [v1.1.1 릴리스](https://github.com/ScanTailor-Advanced/scantailor-advanced/releases/tag/v1.1.1)의
 `ScanTailor-Advanced-1.1.1x64.zip`을 문서 기준으로 사용한다.
-2026-09-18 확인 시 v1.2.1의 첨부 실행 파일은 Linux용 AppImage/deb이며,
-최신 버전 표시만 보고 Windows용으로 선택하지 않는다. 다른 Windows 빌드는 버전과 메뉴를 확인한다.
+아래 메뉴 설명은 Windows용 v1.1.1 기준이다. 다른 빌드는 운영체제 지원과 메뉴를 확인한다.
 
 | 확인할 값 | 설정 위치 | 이 작업의 값 |
 |---|---|---|
@@ -276,9 +275,9 @@ PDF 뷰어에서 실제 페이지 순서와 잘림도 확인한다. 이 시점�
 
 ## 7. OCR 실행하고 완료 확인하기
 
-실제 OCR에는 이 PC에 구성된 GPU/Docker Desktop/OCR 이미지와 모델이 필요하다.
+실제 OCR에는 GPU, Docker Desktop, OCR 이미지와 모델 준비가 필요하다.
 서버가 꺼져 있으면 CLI가 준비를 시도하지만, 이미지·모델 설치를 자동으로 대신하지는 않는다.
-초기 환경 설정은 [OCR 사용 안내](OCR_USAGE.md)를 참고한다.
+초기 환경 설정은 [설치 안내](SETUP.md)를 참고한다.
 
 ```powershell
 python run.py "input/book_v1.pdf" --out "output/book_v1"

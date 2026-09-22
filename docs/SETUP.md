@@ -1,7 +1,6 @@
 # 설치와 첫 실행
 
 모든 명령은 저장소 루트의 PowerShell 기준이다. 프로젝트를 반드시 `C:\ocr`에 둘 필요는 없다.
-기존 실험 문서의 절대 경로는 당시 환경의 예시이며 자신의 경로로 바꾼다.
 
 ## 1. 호스트 Python
 
@@ -47,8 +46,7 @@ docker compose --project-directory compose -f compose/compose.yaml pull
 ```
 
 `.env.example`의 이미지 태그는 현재 프로필의 예시다. `latest` 태그의 내용은 바뀔 수
-있으므로 실제 배포의 image ID/digest를 별도 기록한다. 이 정리 과정에서는 이미지를
-내려받거나 운영 컨테이너를 재시작하지 않았다.
+있으므로 실제 배포의 image ID/digest를 별도 기록한다.
 
 ## 3. 줄 인식 모델 준비
 

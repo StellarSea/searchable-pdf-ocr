@@ -13,8 +13,8 @@ python run.py input --recursive --bookmarks
 ## 이미 변환된 PDF의 책갈피만 갱신
 
 ```powershell
-python run.py bookmarks "input/ocr_output/신호 및 시스템_auto_searchable.pdf"
-python run.py bookmarks "input/ocr_output"
+python run.py bookmarks "output/book/book_auto_searchable.pdf"
+python run.py bookmarks "output"
 ```
 
 OCR 서버 없이 기존 완성 PDF와 게시된 OCR 레이아웃을 사용한다. 해당 책의 SQLite 보고서와
@@ -63,8 +63,7 @@ OCR 오타가 목차 제목 자체에 있으면 별도 교정 파일을 사용�
 OCR 본문·원시 레이아웃을 수정하지 않는다.
 
 ```powershell
-python run.py bookmarks "input/ocr_output/신호 및 시스템_auto_searchable.pdf" --review "reviews/bookmarks/signals.json"
-python run.py bookmarks "input/ocr_output/쉽게 배우는 C 자료구조_auto_searchable.pdf" --review "reviews/bookmarks/cdata.json"
+python run.py bookmarks "output/book/book_auto_searchable.pdf" --review "reviews/bookmarks/book.json"
 ```
 
 교정 파일에는 원본 `source_sha256`, 게시 레이아웃의 `layout_sha256`, `corrections` 목록을 둔다.
@@ -77,7 +76,7 @@ python run.py bookmarks "input/ocr_output/쉽게 배우는 C 자료구조_auto_s
 OCR 변환 자체를 다시 실행할 때는 `--bookmarks --bookmark-review 교정.json`을 명시해야 한다.
 교정 파일은 특정 원본과 레이아웃에만 유효하다.
 
-v3는 쪽수가 없는 장별 contents 패널과 전체 목차를 구별하고, 인쇄 쪽수 열이
+쪽수가 없는 장별 contents 패널과 전체 목차를 구별하고, 인쇄 쪽수 열이
 누락된 연속 목차 페이지를 유지한다. 장 표지의 절 목록은 본문 절 목적지에서 제외하며,
 양쪽 목차 페이지 사이에서 contents 레이블과 절 번호가 충분한 경우에만 손상된 중간 페이지를 연결한다.
 실제 본문 절 제목과 학습목표가 함께 있는 페이지는 장 표지로 오인하지 않는다.
@@ -90,8 +89,8 @@ OCR이 제목을 짧게 오독하여 자동 대조가 불가능하면, **원본 
 
 ## 결과와 정확도 범위
 
-위 예제의 `reviews/` 자료는 특정 원본에 묶인 로컬 교정으로 공개 저장소에 포함하지 않는다.
-외부 사용자는 자신의 원본과 레이아웃 해시에 맞춰 직접 검토 자료를 작성한다.
+예제의 `reviews/bookmarks/book.json`은 사용자가 작성할 경로다. 자신의 원본과 레이아웃
+해시에 맞춰 검토 자료를 작성한다. 문서별 교정 자료는 공개 저장소에 포함하지 않는다.
 
 기존 보고서의 `bookmarks`에 목차 페이지, 전체 후보 수, 확정 항목, 보류 이유, 적용한 교정,
 실제 이동 좌표와 저장 후 검증 결과를 기록한다. `bookmark_refresh`에는 갱신 전후 해시,
@@ -102,4 +101,3 @@ OCR이 제목을 짧게 오독하여 자동 대조가 불가능하면, **원본 
 
 `verified`는 PDF에 계획대로 저장됐다는 뜻이며 OCR 자체의 정답률 보증은 아니다.
 복잡한 목차·심한 오독·불완전한 원본까지 무조건 복원하지 않는다. 원본에 없는 내용을 만들어 넣지 않는다.
-실제 두 책에 대한 검사 범위와 결과는 [검증 기록](BOOKMARKS_VALIDATION_20260916.md)에 정리한다.

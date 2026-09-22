@@ -74,12 +74,9 @@ TIFF의 가로·세로 DPI로 페이지 물리 크기를 계산하고 원래 프
 |---|---|
 | 처음 설치 / 문제 해결 | [SETUP](docs/SETUP.md) |
 | 명령, 모드, 캐시, 검토 | [사용 안내](docs/OCR_USAGE.md) |
-| 내부 구조와 보존 규칙 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | 기여와 오프라인 검증 | [CONTRIBUTING](CONTRIBUTING.md) |
-| 설계·실험·검증 기록 찾기 | [문서 색인](docs/README.md) |
+| 성능·구조 등 전체 안내 | [문서 색인](docs/README.md) |
 | 변경 이력 | [CHANGELOG](CHANGELOG.md) |
-| 의존성 라이선스 | [DEPENDENCIES](docs/DEPENDENCIES.md) |
-| 공개 준비와 검증 범위 | [PUBLIC_RELEASE](docs/PUBLIC_RELEASE.md) |
 
 코드는 `compose/`, 오프라인 회귀 테스트는 `tests/`, 수동 검증·벤치마크 도구는 `tools/`에 있습니다. `tools/`의 OCR 벤치마크는 실제 서비스를 호출할 수 있으며 자동 테스트와 구분됩니다. GitHub Actions는 Windows/Python 3.13에서 오프라인 검사만 실행하도록 구성했습니다.
 
