@@ -1,0 +1,22 @@
+# Observed host environment, Windows / CPython 3.13.15, 2026-09-22.
+# Reproduce with: python -m pip install -r requirements-dev.txt -c constraints-tested.txt
+# Not a hash-locked distribution or a GPU/container environment.
+requests==2.33.1
+charset-normalizer==3.4.7
+idna==3.11
+urllib3==2.6.3
+certifi==2026.2.25
+PyMuPDF==1.28.2
+pypdf==6.16.2
+numpy==2.3.4
+Pillow==11.3.0
+psutil==7.1.0
+fastapi==0.135.3
+starlette==1.0.0
+anyio==4.13.0
+pydantic==2.12.5
+annotated-types==0.7.0
+pydantic_core==2.41.5
+typing_extensions==4.15.0
+typing-inspection==0.4.2
+annotated-doc==0.0.4

@@ -1,0 +1,35 @@
+name: Offline checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            requirements*.txt
+            constraints-tested.txt
+      - name: Install host and test dependencies
+        run: python -m pip install -r requirements-dev.txt -c constraints-tested.txt
+      - name: Check public files and history
+        run: python tools/check_publication.py --history
+      - name: Check architecture
+        run: python tools/check_architecture.py
+      - name: Run offline regressions
+        run: python run.py test
