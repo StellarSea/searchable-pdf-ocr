@@ -31,6 +31,7 @@ import hashlib
 import json
 import re
 import sqlite3
+from contextlib import closing
 import sys
 from collections import Counter
 from difflib import SequenceMatcher
@@ -39,17 +40,23 @@ from pathlib import Path
 import numpy as np
 import pymupdf as fitz
 
-import ocr_to_searchable_pdf as ocr
+from ocr_schema import _find_size, _norm_bbox
+from ocr_storage import atomic_json
+from ocr_artifacts import resolve_text
+from ocr_text import strip_html
+import ocr_workflow as workflow
 
 ITEM_RE = re.compile(r'^[ \t]*(\d{1,3})[.)]\s', re.M)
 
 
-def agreement(cache):
+def agreement(cache, decisions=None):
     """Character agreement between the VLM paragraph text and the line recognizer."""
-    with sqlite3.connect(cache) as db:
-        rows = [json.loads(value) for (value,) in db.execute('select value from decisions')]
-    db.close()
-    dense = lambda text: ''.join(ocr.strip_html(text).split())
+    if decisions is None:
+        with closing(sqlite3.connect(cache)) as db:
+            rows = [json.loads(value) for (value,) in db.execute('select value from decisions')]
+    else:
+        rows = decisions
+    dense = lambda text: ''.join(strip_html(text).split())
     buckets, pages = Counter(), {}
     scored = []
     for row in rows:
@@ -59,7 +66,8 @@ def agreement(cache):
         if not after:
             buckets['no recognizer output'] += 1
             continue
-        ratio = SequenceMatcher(None, before, after, autojunk=False).ratio()
+        ratio = (1.0 if before == after else
+                 SequenceMatcher(None, before, after, autojunk=False).ratio())
         scored.append((ratio, row['page'], len(before)))
         band = ('0.99+' if ratio >= 0.99 else '0.95-0.99' if ratio >= 0.95 else
                 '0.90-0.95' if ratio >= 0.90 else 'under 0.90')
@@ -90,7 +98,7 @@ def coverage(pdf, pruned=None, zoom=0.5, edge=0.02, floor=0.12, contrast=40):
     block. Pictures do not trigger it: a photograph sits inside a detected image
     block, so its ink counts as covered.
     """
-    pages = json.loads(Path(pruned).read_text(encoding='utf-8')) if pruned else None
+    pages = json.loads(resolve_text(pruned).read_text(encoding='utf-8')) if pruned else None
     rows, flagged = [], []
     with fitz.open(pdf) as doc:
         for index in range(len(doc)):
@@ -114,12 +122,12 @@ def coverage(pdf, pruned=None, zoom=0.5, edge=0.02, floor=0.12, contrast=40):
                    'characters': len(''.join(page.get_text().split()))}
             if pages is not None and total:
                 blocks = pages[index].get('parsing_res_list', []) if index < len(pages) else []
-                size = ocr._find_size(pages[index]) if blocks else None
+                size = _find_size(pages[index]) if blocks else None
                 if size and size[0] and size[1]:
                     sx = page.rect.width / size[0] * zoom
                     sy = page.rect.height / size[1] * zoom
                     for block in blocks:
-                        box = ocr._norm_bbox(block.get('block_bbox'))
+                        box = _norm_bbox(block.get('block_bbox'))
                         if not box:
                             continue
                         x0 = max(0, int(box[0]*sx) - 2); x1 = min(pix.width, int(box[2]*sx) + 3)
@@ -178,30 +186,39 @@ def layout_cache(pdf, stem):
     Reading the stale file instead reports the previous run's layout, which is
     exactly the mistake that made a fixed book look unchanged.
     """
-    report = pdf.parent / f'{stem}_auto_report.json'
+    report = workflow.find_artifact(pdf.parent, f'{stem}_auto_report.json')
     try:
-        identity = json.loads(report.read_text(encoding='utf-8'))['source_identity']
+        recorded = json.loads(report.read_text(encoding='utf-8'))
+        if recorded.get('layout_cache') and resolve_text(recorded['layout_cache']).is_file():
+            return resolve_text(recorded['layout_cache'])
+        identity = recorded['source_identity']
         fingerprint = hashlib.sha256(
             json.dumps(identity, sort_keys=True).encode()).hexdigest()[:20]
-        isolated = pdf.parent / '.ocr_cache' / fingerprint / 'pruned.json'
+        isolated = resolve_text(workflow.find_artifact(pdf.parent, '.ocr_cache') / fingerprint / 'pruned.json')
         if isolated.exists():
             return isolated
     except (ValueError, OSError, KeyError):
         pass
-    return pdf.parent / f'{stem}_pruned.json'
+    return workflow.find_artifact(pdf.parent, f'{stem}_pruned.json')
 
 
 def audit_one(pdf, cache=None, pruned=None, items=None, copies=1):
+    explicit_cache = cache is not None
     stem = pdf.name.split('_auto_')[0]
     pruned = pruned or layout_cache(pdf, stem)
-    cache = cache or pdf.parent / f'{stem}_line_ocr.sqlite3'
-    status_path = pdf.parent / f'{stem}_auto_status.json'
+    cache = cache or workflow.find_artifact(pdf.parent, f'{stem}_line_ocr.sqlite3')
+    status_path = workflow.find_artifact(pdf.parent, f'{stem}_auto_status.json')
     report = {'pdf': str(pdf), 'document': stem,
-              'coverage': coverage(pdf, pruned if Path(pruned).exists() else None)}
+              'coverage': coverage(pdf, pruned if resolve_text(pruned).exists() else None)}
     if items:
         first, last = (int(v) for v in items.split('-'))
         report['sequence'] = sequence(pdf, first, last, copies)
-    report['agreement'] = (agreement(cache) if Path(cache).exists()
+    try:
+        saved = json.loads(workflow.find_artifact(pdf.parent, f'{stem}_auto_report.json').read_text(encoding='utf-8'))
+        decisions = None if explicit_cache else saved.get('line_decisions')
+    except (ValueError, OSError):
+        decisions = None
+    report['agreement'] = (agreement(cache, decisions) if decisions is not None or Path(cache).exists()
                            else {'skipped': f'no line cache at {cache}'})
     try:
         report['pipeline_status'] = json.loads(
@@ -286,7 +303,7 @@ def main():
         print_one(report, args.items, args.copies)
 
     if args.out:
-        ocr.atomic_json(args.out, report)
+        atomic_json(args.out, report)
         print(f'[report] {args.out}')
 
 

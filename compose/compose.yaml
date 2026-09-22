@@ -23,7 +23,9 @@ services:
       - LINE_OCR_CPU_THREADS=8
       - LINE_OCR_BATCH_SIZE=32
       - LINE_OCR_DEVICE=gpu:0
-      - LINE_OCR_WORKERS=4
+      # Measured on RTX 5080: extra GPU workers slowed current small-block
+      # requests. Override for a separately benchmarked workload / GPU.
+      - LINE_OCR_WORKERS=${LINE_OCR_WORKERS:-1}
       # Keep 320: the recognizer is trained around this width and measurably
       # loses accuracy when short lines are padded out to a wider input (tried
       # 768, which dropped Latin block acceptance from 93% to 86%). Long lines
@@ -60,7 +62,13 @@ services:
     restart: unless-stopped
     environment:
       - VLM_BACKEND=${VLM_BACKEND:-vllm}
-    command: /bin/bash -c "paddlex --serve --pipeline /home/paddleocr/pipeline_config_${VLM_BACKEND}.yaml"
+      - OCR_PDF_WORKERS=${OCR_PDF_WORKERS:-4}
+      - OCR_PDF_MEMORY_MB=${OCR_PDF_MEMORY_MB:-8192}
+      - OCR_PDF_TIMEOUT=${OCR_PDF_TIMEOUT:-60}
+    volumes:
+      - ./ocr_server_entrypoint.py:/opt/ocr/ocr_server_entrypoint.py:ro
+      - ./ocr_server_pdf.py:/opt/ocr/ocr_server_pdf.py:ro
+    command: /bin/bash -c "python /opt/ocr/ocr_server_entrypoint.py --serve --pipeline /home/paddleocr/pipeline_config_${VLM_BACKEND}.yaml"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
 

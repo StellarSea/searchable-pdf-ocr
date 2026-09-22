@@ -6,7 +6,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pymupdf as fitz
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'compose'))
 import ocr_to_searchable_pdf as ocr
+import ocr_workflow
 
 
 def main():
@@ -34,7 +36,7 @@ def main():
         assert api.call_count==0
     with fitz.open(out/'auto3_auto_searchable.pdf') as doc:
         assert len(doc)==3
-    report=json.loads((out/'auto3_auto_report.json').read_text(encoding='utf-8'))
+    report=json.loads(ocr_workflow.find_artifact(out, 'auto3_auto_report.json').read_text(encoding='utf-8'))
     assert not report['validation_failed']
     print('Real scan default workflow verified, no manual review or API calls:',report['status'])
 

@@ -9,6 +9,8 @@ from pathlib import Path
 import pymupdf as fitz
 from PIL import Image, ImageDraw
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'compose'))
 import ocr_to_searchable_pdf as ocr
 import validate_ocr_documents as validation
 

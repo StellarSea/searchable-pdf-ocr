@@ -6,10 +6,39 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pymupdf as fitz
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'compose'))
 import ocr_to_searchable_pdf as ocr
 
 
 class RegressionTests(unittest.TestCase):
+    def test_reviewed_layout_restores_clipped_heading_and_preserves_cache(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source, output, review_path = root/'in.pdf', root/'out.pdf', root/'review.json'
+            original = [{'width': 300, 'height': 200, 'parsing_res_list': [
+                {'block_content': 'R 02', 'block_bbox': [80, 40, 140, 60]}]}]
+            review = {'source_sha256': 'correct', 'pages': [{
+                'page': 1, 'reason': 'Compared against the source image',
+                'original_blocks': original[0]['parsing_res_list'],
+                'lines': [{'text': 'CHAPTER 02', 'bbox': [20, 40, 140, 60]}]}]}
+            ocr.atomic_json(review_path, review)
+            fixed = ocr.apply_layout_review(original, review_path, 'correct')
+            self.assertEqual(original[0]['parsing_res_list'][0]['block_content'], 'R 02')
+            with self.assertRaisesRegex(ValueError, 'source PDF'):
+                ocr.apply_layout_review(original, review_path, 'wrong')
+            with fitz.open() as doc:
+                doc.new_page(width=300, height=200)
+                doc.save(source)
+            with patch.object(ocr, 'detect_lines', side_effect=AssertionError('reclipped review')):
+                ocr.overlay(source, fixed, output, automatic=True)
+            with fitz.open(output) as doc:
+                self.assertTrue(doc[0].search_for('CHAPTER 02'))
+            review['pages'][0]['original_blocks'] = []
+            ocr.atomic_json(review_path, review)
+            with self.assertRaisesRegex(ValueError, 'original OCR'):
+                ocr.apply_layout_review(original, review_path, 'correct')
+
     def test_line_alignment_preserves_content_despite_recognition_changes(self):
         original = '그림 20.1에서 잠깐 닫거나 열면 반응한다.'
         candidates = ['그', '림 20.1에서 갑자기 닫거나', '열면 반응한다.']
@@ -88,6 +117,25 @@ class RegressionTests(unittest.TestCase):
                 refiner.refine(page, ''.join(chunks), boxes, chunks)
             self.assertEqual(api.call_count, 1)
             self.assertEqual(len(api.call_args.args[0]), 8)
+
+    def test_recognize_lines_splits_requests_at_server_limit(self):
+        request_sizes = []
+
+        def post(_url, json, timeout):
+            start = sum(request_sizes)
+            request_sizes.append(len(json['images']))
+            response = Mock()
+            response.json.return_value = {
+                'texts': [f'line {index}' for index in range(start, start + len(json['images']))]
+            }
+            return response
+
+        images = [f'image {index}'.encode() for index in range(331)]
+        with patch.object(ocr.requests, 'post', side_effect=post):
+            values = ocr.recognize_lines(images, lang='korean')
+
+        self.assertEqual(request_sizes, [256, 75])
+        self.assertEqual(values, [f'line {index}' for index in range(331)])
 
     def test_aligned_boundary_never_lands_inside_a_latin_word(self):
         """A recognizer that drops characters used to shift the boundary mid-word."""
@@ -254,6 +302,26 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(''.join(''.join(chunks).split()), ''.join(text.split()))
         self.assertTrue(any('decoder' in c for c in chunks))
         self.assertTrue(any('0.950c' in c for c in chunks))
+
+    def test_oversized_scan_coordinates_do_not_split_lines_into_words(self):
+        """Scanner pixel coordinates used as points must scale line thresholds."""
+        with fitz.open() as doc:
+            page = doc.new_page(width=3346.5, height=4314.75)
+            page.insert_font(fontname='korea')
+            first = '이러한 링크를 다양하게 늘리면 선형 자료 구조 뿐 아니라'
+            second = '두 번째 줄입니다'
+            page.insert_text((500, 1000), first, fontname='korea', fontsize=60)
+            page.insert_text((500, 1120), second, fontname='korea', fontsize=60)
+
+            self.assertGreater(ocr.page_coordinate_scale(page), 5)
+            rects = ocr.detect_lines(page, fitz.Rect(450, 900, 2900, 1180))
+            self.assertEqual(len(rects), 2)
+            self.assertLess(rects[0].y1, rects[1].y0)
+
+    def test_normal_pdf_coordinates_are_not_rescaled(self):
+        with fitz.open() as doc:
+            page = doc.new_page(width=612, height=792)
+            self.assertEqual(ocr.page_coordinate_scale(page), 1.0)
 
     def test_a_rotated_cropped_page_is_rendered_upright_before_ocr(self):
         """The layout model read less than half the text off a rotated, cropped scan."""
@@ -450,6 +518,31 @@ class RegressionTests(unittest.TestCase):
                                       [('ocrsymbol',fitz.Font(fontfile=str(path)),str(path))])
             self.assertIn('☐',p.get_text())
             self.assertNotIn('\x00',p.get_text())
+
+    def test_multiline_table_cells_resolve_split_text_and_preserve_characters(self):
+        # Three logical rows, four physical bands. At least one row must use
+        # the multiline branch that the old single-band table test missed.
+        rows = [['Alpha Beta', '100 200', 'One Two'],
+                ['Gamma', '300', 'Three'], ['Delta', '400', 'Four']]
+        physical = [['Alpha', '100', 'One'], ['Beta', '200', 'Two'],
+                    rows[1], rows[2]]
+        html = '<table>' + ''.join('<tr>'+''.join('<td>'+v+'</td>' for v in row)+'</tr>'
+                                   for row in rows) + '</table>'
+        font = fitz.Font('helv')
+        with fitz.open() as doc:
+            page = doc.new_page(width=300, height=200)
+            rects = []
+            for ri, row in enumerate(physical):
+                for ci, value in enumerate(row):
+                    x, y = 30+ci*80, 30+ri*30
+                    page.insert_text((x, y+10), value, fontsize=10)
+                    rects.append(fitz.Rect(x, y, x+font.text_length(value, fontsize=10), y+13))
+            result = ocr.layout_table(page, fitz.Rect(20, 20, 280, 140), html, rects, font)
+            self.assertIsNotNone(result)
+            boxes, chunks = result
+            self.assertGreater(len(boxes), 9)
+            self.assertEqual(len(boxes), len(chunks))
+            self.assertEqual(''.join(''.join(chunks).split()), ''.join(''.join(v for r in rows for v in r).split()))
 
     def test_table_reconstructs_merged_cells_without_consuming_neighbor_text(self):
         rows = [['NAME','VALUE','RANK'],['ALPHA','5000','1'],['BETA','3000','2']]

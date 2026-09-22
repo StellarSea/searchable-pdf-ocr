@@ -1,0 +1,6 @@
+requests
+pymupdf
+pypdf
+numpy
+Pillow
+psutil

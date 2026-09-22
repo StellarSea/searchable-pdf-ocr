@@ -1,0 +1,4 @@
+-r requirements.txt
+# Tests import the HTTP service with the model constructor mocked; no GPU needed.
+fastapi
+pydantic
