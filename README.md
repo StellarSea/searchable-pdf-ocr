@@ -22,6 +22,8 @@ Local scanned-PDF OCR with Korean/English line alignment, resumable caches, and 
 먼저 GPU 없이 설치와 코드 검증을 할 수 있습니다. PowerShell에서 저장소 루트 기준:
 
 ```powershell
+git clone https://github.com/StellarSea/searchable-pdf-ocr.git
+cd searchable-pdf-ocr
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt -c constraints-tested.txt
 .\.venv\Scripts\python.exe run.py doctor
