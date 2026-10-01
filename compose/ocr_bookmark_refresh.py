@@ -101,6 +101,12 @@ def refresh(pdf, review_path=None, *, content_verifier=verify_content):
             raise ValueError('Published OCR layout hash mismatch')
         if review_path is None:
             review_path = old_report.get('bookmark_review_path')
+        if review_path:
+            review_path = resolve_text(review_path)
+            if isinstance(review_path, Path):
+                review_path = review_path.resolve()
+        review_sha256 = (hashlib.sha256(review_path.read_bytes()).hexdigest()
+                         if review_path else None)
         corrections = load_review(review_path, old_report['source_identity'], pages)
         plan = build_plan(pages, corrections)
         old_bookmarks = old_report.get('bookmarks')
@@ -128,9 +134,10 @@ def refresh(pdf, review_path=None, *, content_verifier=verify_content):
         updated = copy.deepcopy(old_report)
         updated['bookmarks'] = result
         updated['bookmark_refresh'] = {'before_sha256': file_hash(before_pdf), 'output_sha256': file_hash(candidate),
-            'backup': str(before_pdf), 'preservation': preservation, 'layout_sha256': layout_hash(pages)}
+            'backup': str(before_pdf), 'preservation': preservation, 'layout_sha256': layout_hash(pages),
+            'review_sha256': review_sha256}
         if review_path:
-            updated['bookmark_review_path'] = str(Path(review_path).resolve())
+            updated['bookmark_review_path'] = str(review_path)
         if result['review'] and updated.get('status') == 'completed':
             updated['status'] = 'completed_with_warnings'
         atomic_json(history/'verified_report.json', updated)
@@ -139,7 +146,12 @@ def refresh(pdf, review_path=None, *, content_verifier=verify_content):
 
 def _publish_verified(history):
     """Caller owns the output lock. A saved verification is reusable only for
-    the exact unchanged source, current output, report and candidate bytes."""
+    the exact unchanged source, backup and verified PDF bytes.
+
+    PDF replacement and SQLite/report writes cannot share one transaction. A
+    retry may therefore finish the report/summary/status after the exact verified
+    PDF was already moved into place, without needing the consumed candidate.
+    """
     updated = json.loads((history/'verified_report.json').read_text(encoding='utf-8'))
     old_report = json.loads((history/'before_report.json').read_text(encoding='utf-8'))
     pdf = Path(updated['output']).resolve()
@@ -152,17 +164,29 @@ def _publish_verified(history):
             'all_pixels_equal', 'all_text_and_boxes_equal', 'all_page_objects_and_streams_equal')):
         raise ValueError('History does not contain successful preservation verification')
     candidate, before_pdf = history/'candidate.pdf', history/'before.pdf'
-    if file_hash(candidate) != updated['bookmark_refresh']['output_sha256']:
-        raise ValueError('Verified candidate changed')
-    expected = updated['bookmark_refresh']['before_sha256']
-    if file_hash(pdf) != expected or file_hash(before_pdf) != expected:
+    verified_hash = updated['bookmark_refresh']['output_sha256']
+    before_hash = updated['bookmark_refresh']['before_sha256']
+    current_hash = file_hash(pdf)
+    already_published = current_hash == verified_hash
+    if candidate.exists():
+        if file_hash(candidate) != verified_hash:
+            raise ValueError('Verified candidate changed')
+    elif not already_published:
+        raise ValueError('Verified candidate is missing; PDF has not been published')
+    if current_hash not in (before_hash, verified_hash) or file_hash(before_pdf) != before_hash:
         raise ValueError('Current PDF or backup changed since verification')
     if file_hash(old_report['source']) != old_report['source_identity']['sha256']:
         raise ValueError('Source PDF changed since verification')
     current = json.loads(find_artifact(folder, stem+'_auto_report.json').read_text(encoding='utf-8'))
-    if current != old_report:
+    if current != old_report and not (already_published and current == updated):
         raise ValueError('Published OCR report changed since verification')
-    candidate.replace(pdf)
+    review_sha256 = updated['bookmark_refresh'].get('review_sha256')
+    if updated.get('bookmark_review_path') and review_sha256 is not None:
+        current_review_hash = hashlib.sha256(resolve_text(updated['bookmark_review_path']).read_bytes()).hexdigest()
+        if current_review_hash != review_sha256:
+            raise ValueError('Bookmark review changed since verification')
+    if not already_published:
+        candidate.replace(pdf)
     atomic_json(document_artifact(folder, stem, stem+'_auto_report.json'), updated)
     write_summary(document_artifact(folder, stem, stem+'_auto_report.md'), updated)
     state_path = find_artifact(folder, stem+'_auto_status.json')
@@ -170,8 +194,13 @@ def _publish_verified(history):
         state = json.loads(state_path.read_text(encoding='utf-8'))
         state['status'] = updated['status']
         state.setdefault('options', {})['bookmarks'] = updated['bookmarks']['version']
-        if updated.get('bookmark_review_path'):
-            state['options']['bookmark_review'] = file_hash(updated['bookmark_review_path'])
+        if updated.get('bookmark_review_path') and review_sha256 is not None:
+            state['options']['bookmark_review'] = review_sha256
+        else:
+            # Legacy verified histories lack the applied input digest. Keep
+            # their retry path, but omit unknown identity so batch completion
+            # cannot claim that today's review produced the published PDF.
+            state['options'].pop('bookmark_review', None)
         atomic_json(document_artifact(folder, stem, stem+'_auto_status.json'), state)
     result = updated['bookmarks']
     print(f"[bookmarks] {pdf.name}: {result['inserted']} added, {len(result['review'])} unresolved; backup {before_pdf}", flush=True)

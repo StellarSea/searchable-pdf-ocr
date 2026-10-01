@@ -5,6 +5,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pymupdf as fitz
 
@@ -13,6 +14,7 @@ from ocr_bookmarks import build_plan, apply_plan, verify_bookmarks, load_review,
 from ocr_bookmark_refresh import refresh, verify_content, file_hash, publish_verified
 from ocr_storage import atomic_json
 from ocr_workflow import document_artifact, find_artifact
+import ocr_bookmark_refresh as bookmark_refresh
 from test_ocr_bookmarks import page, block
 
 
@@ -178,6 +180,150 @@ class BookmarkRefreshTests(unittest.TestCase):
             result = publish_verified(history)
             self.assertEqual(pdf.read_bytes(), verified_bytes)
             self.assertEqual(result, updated)
+
+    def reviewed_fixture(self, root):
+        source, pdf, pages = self.fixture(root)
+        review = root/'review.json'
+        atomic_json(review, {'source_sha256': file_hash(source), 'layout_sha256': layout_hash(pages),
+            'corrections': [{'toc_page': 1, 'original_title': 'Chapter 1 One',
+                             'title': 'Chapter 1 Reviewed One', 'reason': 'Source image inspected'}]})
+        state = document_artifact(pdf.parent, 'book', 'book_auto_status.json')
+        atomic_json(state, {'status': 'completed', 'options': {}})
+        return pdf, review, state
+
+    def test_review_identity_is_preserved_when_publication_resumes(self):
+        with tempfile.TemporaryDirectory() as td:
+            pdf, review, state = self.reviewed_fixture(Path(td))
+            review_bytes, applied_hash = review.read_bytes(), file_hash(review)
+            with patch.object(bookmark_refresh, 'write_summary', side_effect=OSError('summary failed')):
+                with self.assertRaisesRegex(OSError, 'summary failed'):
+                    refresh(pdf, review)
+            history = next((pdf.parent/'.ocr'/'bookmark_history'/'book').iterdir())
+            updated = json.loads((history/'verified_report.json').read_text(encoding='utf-8'))
+            self.assertEqual(updated['bookmark_refresh']['review_sha256'], applied_hash)
+            self.assertEqual(updated['bookmarks']['entries'][0]['title'], 'Chapter 1 Reviewed One')
+            report = find_artifact(pdf.parent, 'book_auto_report.json')
+            before_pdf, before_report, before_state = pdf.read_bytes(), report.read_bytes(), state.read_bytes()
+            changed = json.loads(review_bytes)
+            changed['corrections'][0]['title'] = 'Chapter 1 Changed Again'
+            atomic_json(review, changed)
+            with self.assertRaisesRegex(ValueError, 'review changed'):
+                publish_verified(history)
+            self.assertEqual(pdf.read_bytes(), before_pdf)
+            self.assertEqual(report.read_bytes(), before_report)
+            self.assertEqual(state.read_bytes(), before_state)
+            review.write_bytes(review_bytes)
+            for _ in range(2):
+                self.assertEqual(publish_verified(history), updated)
+                self.assertEqual(pdf.read_bytes(), before_pdf)
+                self.assertEqual(json.loads(state.read_text())['options']['bookmark_review'], applied_hash)
+
+    def test_review_change_during_verification_does_not_publish(self):
+        with tempfile.TemporaryDirectory() as td:
+            pdf, review, state = self.reviewed_fixture(Path(td))
+            report = find_artifact(pdf.parent, 'book_auto_report.json')
+            before_pdf, before_report, before_state = pdf.read_bytes(), report.read_bytes(), state.read_bytes()
+            def verify_then_change(source, candidate):
+                result = verify_content(source, candidate)
+                changed = json.loads(review.read_text())
+                changed['corrections'][0]['title'] = 'Chapter 1 Changed Again'
+                atomic_json(review, changed)
+                return result
+            with self.assertRaisesRegex(ValueError, 'review changed'):
+                refresh(pdf, review, content_verifier=verify_then_change)
+            self.assertEqual(pdf.read_bytes(), before_pdf)
+            self.assertEqual(report.read_bytes(), before_report)
+            self.assertEqual(state.read_bytes(), before_state)
+
+    def test_legacy_history_resumes_without_claiming_a_review_hash(self):
+        for with_review in (False, True):
+            for before_replacement in (False, True):
+                with self.subTest(review=with_review, before_replacement=before_replacement), tempfile.TemporaryDirectory() as td:
+                    root = Path(td)
+                    if with_review:
+                        pdf, review, state = self.reviewed_fixture(root)
+                    else:
+                        _, pdf, _ = self.fixture(root)
+                        review = None
+                        state = document_artifact(pdf.parent, 'book', 'book_auto_status.json')
+                    atomic_json(state, {'status': 'completed', 'options': {'bookmark_review': 'unverified old hash'}})
+                    with patch.object(bookmark_refresh, 'write_summary', side_effect=OSError('summary failed')):
+                        with self.assertRaises(OSError):
+                            refresh(pdf, review)
+                    history = next((pdf.parent/'.ocr'/'bookmark_history'/'book').iterdir())
+                    updated = json.loads((history/'verified_report.json').read_text(encoding='utf-8'))
+                    del updated['bookmark_refresh']['review_sha256']
+                    atomic_json(history/'verified_report.json', updated)
+                    report = find_artifact(pdf.parent, 'book_auto_report.json')
+                    verified_bytes = pdf.read_bytes()
+                    if before_replacement:
+                        (history/'candidate.pdf').write_bytes(verified_bytes)
+                        shutil.copyfile(history/'before.pdf', pdf)
+                        old = json.loads((history/'before_report.json').read_text(encoding='utf-8'))
+                        atomic_json(report, old)
+                    else:
+                        atomic_json(report, updated)
+                    if review:
+                        changed = json.loads(review.read_text())
+                        changed['corrections'][0]['title'] = 'Chapter 1 Later Review'
+                        atomic_json(review, changed)
+                    for _ in range(2):
+                        self.assertEqual(publish_verified(history), updated)
+                        self.assertEqual(pdf.read_bytes(), verified_bytes)
+                        self.assertEqual(json.loads(report.read_text()), updated)
+                        self.assertNotIn('bookmark_review', json.loads(state.read_text())['options'])
+
+    def test_publication_retry_finishes_after_pdf_report_or_summary_was_published(self):
+        for failed_step in ('report', 'summary', 'status'):
+            with self.subTest(failed_step=failed_step), tempfile.TemporaryDirectory() as td:
+                _, pdf, _ = self.fixture(Path(td))
+                before = pdf.read_bytes()
+                state = document_artifact(pdf.parent, 'book', 'book_auto_status.json')
+                atomic_json(state, {'status': 'completed', 'options': {}})
+
+                def write(path, value):
+                    if getattr(path, 'key', None) == f'book_auto_{failed_step}.json':
+                        raise OSError('injected publication failure')
+                    return atomic_json(path, value)
+
+                summary = bookmark_refresh.write_summary
+                if failed_step == 'summary':
+                    def summary(*args):
+                        raise OSError('injected publication failure')
+                with patch.object(bookmark_refresh, 'atomic_json', side_effect=write), \
+                        patch.object(bookmark_refresh, 'write_summary', side_effect=summary):
+                    with self.assertRaisesRegex(OSError, 'publication failure'):
+                        refresh(pdf)
+                history = next((pdf.parent/'.ocr'/'bookmark_history'/'book').iterdir())
+                updated = json.loads((history/'verified_report.json').read_text(encoding='utf-8'))
+                verified_bytes = pdf.read_bytes()
+                self.assertNotEqual(before, verified_bytes)
+                self.assertFalse((history/'candidate.pdf').exists())
+                self.assertEqual((history/'before.pdf').read_bytes(), before)
+
+                self.assertEqual(publish_verified(history), updated)
+                self.assertEqual(pdf.read_bytes(), verified_bytes)
+                self.assertEqual(json.loads(find_artifact(pdf.parent, 'book_auto_report.json').read_text()), updated)
+                self.assertIn('OCR 처리 결과', find_artifact(pdf.parent, 'book_auto_report.md').read_text())
+                self.assertEqual(json.loads(state.read_text())['options']['bookmarks'], updated['bookmarks']['version'])
+                self.assertEqual(publish_verified(history), updated)
+
+    def test_publication_retry_rejects_external_pdf_changes_after_replacement(self):
+        with tempfile.TemporaryDirectory() as td:
+            _, pdf, _ = self.fixture(Path(td))
+            def write(path, value):
+                if getattr(path, 'key', None) == 'book_auto_report.json':
+                    raise OSError('injected report failure')
+                return atomic_json(path, value)
+            with patch.object(bookmark_refresh, 'atomic_json', side_effect=write):
+                with self.assertRaisesRegex(OSError, 'report failure'):
+                    refresh(pdf)
+            history = next((pdf.parent/'.ocr'/'bookmark_history'/'book').iterdir())
+            pdf.write_bytes(pdf.read_bytes()+b'external change')
+            modified = pdf.read_bytes()
+            with self.assertRaisesRegex(ValueError, 'candidate is missing|Current PDF'):
+                publish_verified(history)
+            self.assertEqual(pdf.read_bytes(), modified)
 
     def test_user_edits_to_generated_outline_are_not_overwritten(self):
         with tempfile.TemporaryDirectory() as td:

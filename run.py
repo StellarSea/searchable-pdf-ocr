@@ -18,6 +18,7 @@ def main(argv=None):
               '  python run.py <PDF 또는 폴더> [OCR 옵션]\n'
               '  python run.py audit <결과 PDF 또는 폴더> [검사 옵션]\n'
               '  python run.py test\n\n'
+              '  python run.py doctor [--services] [--json]\n'
               '  python run.py bookmarks <완료 PDF 또는 출력 폴더> [--review 검토.json]\n'
               '  python run.py organize <기존 출력 폴더>\n'
               '  python run.py compact <출력 폴더>\n'
@@ -28,6 +29,9 @@ def main(argv=None):
               '상세 옵션: python run.py <PDF 또는 폴더> --help\n'
               '사용 안내: docs/OCR_USAGE.md')
         return 0
+    if args[0] == 'doctor':
+        from ocr_doctor import main as doctor_main
+        return doctor_main(args[1:])
     if args[0] == 'compact':
         import ocr_workflow
         if len(args) != 2 or not Path(args[1]).is_dir():
@@ -62,10 +66,10 @@ def main(argv=None):
     previous_argv = sys.argv
     try:
         sys.argv = [str(ROOT / 'compose' / script), *forwarded]
-        importlib.import_module(Path(script).stem).main()
+        result = importlib.import_module(Path(script).stem).main()
     finally:
         sys.argv = previous_argv
-    return 0
+    return 0 if result is None else result
 
 
 if __name__ == '__main__':

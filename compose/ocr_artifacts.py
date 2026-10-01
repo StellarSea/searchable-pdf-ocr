@@ -46,10 +46,14 @@ class TextArtifact:
     is_file = exists
 
     def read_bytes(self):
-        if not self.exists():
+        if not self.database.is_file():
             raise FileNotFoundError(str(self))
         with closing(connect(self.database)) as db:
-            row = db.execute('SELECT content,sha256 FROM artifacts WHERE name=?', (self.key,)).fetchone()
+            table = db.execute("SELECT 1 FROM sqlite_master WHERE name='artifacts'").fetchone()
+            row = (db.execute('SELECT content,sha256 FROM artifacts WHERE name=?',
+                              (self.key,)).fetchone() if table else None)
+        if row is None:
+            raise FileNotFoundError(str(self))
         data = bytes(row[0])
         if hashlib.sha256(data).hexdigest() != row[1]:
             raise ValueError(f'Artifact checksum mismatch: {self}')

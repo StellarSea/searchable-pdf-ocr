@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pymupdf as fitz
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'compose'))
+import ocr_artifacts
 from ocr_artifacts import TextArtifact, import_sidecars, resolve_text, export_artifacts
 from ocr_storage import BoundaryCache, atomic_json
 import ocr_workflow as workflow
@@ -27,6 +28,61 @@ class ArtifactTests(unittest.TestCase):
         self.internal = self.root/'.ocr'
         self.internal.mkdir()
         self.database = self.internal/'book_line_ocr.sqlite3'
+
+    def test_missing_reads_preserve_database_and_legacy_tables(self):
+        entry = TextArtifact(self.database, 'missing.json')
+        with self.assertRaises(FileNotFoundError):
+            entry.read_bytes()
+        self.assertFalse(self.database.exists())
+
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('CREATE TABLE responses (key TEXT PRIMARY KEY, value TEXT)')
+            db.execute("INSERT INTO responses VALUES ('image', 'original text')")
+        legacy_bytes = self.database.read_bytes()
+        with self.assertRaises(FileNotFoundError):
+            entry.read_bytes()
+        self.assertEqual(self.database.read_bytes(), legacy_bytes)
+
+        TextArtifact(self.database, 'present.json').write_text('{"text": "원문"}')
+        with_artifacts_bytes = self.database.read_bytes()
+        with self.assertRaises(FileNotFoundError):
+            entry.read_bytes()
+        self.assertEqual(self.database.read_bytes(), with_artifacts_bytes)
+
+    def test_reads_close_connection_and_reject_checksum_and_schema_errors(self):
+        entry = TextArtifact(self.database, 'book.md')
+        content = '원문 Unicode 𠀀\r\n'.encode('utf-8')
+        entry.write_bytes(content)
+        real_connect = ocr_artifacts.connect
+        connections = []
+
+        def record_connection(*args, **kwargs):
+            connection = real_connect(*args, **kwargs)
+            connections.append(connection)
+            return connection
+
+        with patch.object(ocr_artifacts, 'connect', side_effect=record_connection):
+            self.assertEqual(entry.read_bytes(), content)
+            with self.assertRaises(FileNotFoundError):
+                TextArtifact(self.database, 'missing.md').read_bytes()
+            with closing(sqlite3.connect(self.database)) as db, db:
+                db.execute("UPDATE artifacts SET sha256='corrupt' WHERE name='book.md'")
+            damaged_bytes = self.database.read_bytes()
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                entry.read_bytes()
+            self.assertEqual(self.database.read_bytes(), damaged_bytes)
+
+            broken_database = self.internal/'broken.sqlite3'
+            with closing(sqlite3.connect(broken_database)) as db, db:
+                db.execute('CREATE TABLE artifacts (name TEXT PRIMARY KEY)')
+            broken_bytes = broken_database.read_bytes()
+            with self.assertRaises(sqlite3.OperationalError):
+                TextArtifact(broken_database, 'book.md').read_bytes()
+            self.assertEqual(broken_database.read_bytes(), broken_bytes)
+
+        for connection in connections:
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute('SELECT 1')
 
     def test_import_preserves_bytes_and_existing_sql_tables_and_exports(self):
         with closing(sqlite3.connect(self.database)) as db, db:

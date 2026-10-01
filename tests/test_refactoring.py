@@ -53,6 +53,19 @@ class RefactoringTests(unittest.TestCase):
             load.assert_called_once_with('ocr_to_searchable_pdf')
         self.assertIs(sys.argv, previous)
 
+    def test_dispatcher_propagates_batch_failure_and_accepts_no_return(self):
+        spec = importlib.util.spec_from_file_location('refactor_entrypoint', ROOT/'run.py')
+        entrypoint = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(entrypoint)
+        previous = sys.argv
+        for result, expected in ((1, 1), (0, 0), (None, 0)):
+            with self.subTest(child_result=result), \
+                    patch.object(entrypoint.importlib, 'import_module',
+                                 return_value=Mock(main=Mock(return_value=result))) as load:
+                self.assertEqual(entrypoint.main([str(ROOT), '--stop-on-failure']), expected)
+                load.assert_called_once_with('ocr_batch')
+            self.assertIs(sys.argv, previous)
+
     def test_unpublished_decisions_cannot_replace_previous_audit(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td)/'lines.json'
