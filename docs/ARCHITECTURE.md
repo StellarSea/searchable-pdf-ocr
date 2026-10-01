@@ -8,6 +8,7 @@
 | 파일 | 책임 | 하지 않는 일 |
 |---|---|---|
 | `run.py` | PDF·폴더·audit·test·organize 명령 분배 | 모델 실행, PDF 알고리즘 구현 |
+| `compose/ocr_doctor.py` | 설치 패키지·모델 파일·Compose·서비스 health의 읽기 전용 진단 | 서비스 시작/재시작, 추론, PDF·캐시 쓰기 |
 | `compose/ocr_to_searchable_pdf.py` | 작업 흐름, 줄 인식 조정, overlay, 검증 후 게시, 과거 import 호환 | 순수 알고리즘의 중복 구현 |
 | `compose/ocr_api.py` | HTTP 요청·재시도·응답 수 확인·모델/캐시 식별자 | Docker 시작, 파일 저장 |
 | `compose/ocr_source.py` | PDF 분할·회전 정규화·원본 SHA-256 | 원본 PDF 수정 |
