@@ -4,6 +4,10 @@
 
 Local scanned-PDF OCR with Korean/English line alignment, resumable caches, and pixel/text verification. The tested deployment uses Windows and NVIDIA Blackwell; the regression suite runs without an OCR service or GPU.
 
+## AI 사용 고지
+
+이 프로젝트의 개발 과정에서 생성형 인공지능(AI)을 사용했습니다. AI 도구는 코드 작성·수정, 테스트·문서 작성 및 코드 리뷰에 활용되었습니다.
+
 ## 하는 일
 
 - PaddleOCR-VL 문단 인식을 바탕으로 원본에 투명 텍스트를 삽입합니다.
