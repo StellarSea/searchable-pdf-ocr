@@ -54,6 +54,9 @@ wheel·실행 파일·컨테이너를 재배포할 때는 포함된 폰트·코�
 두 줄 모델의 로컬 세 추론 파일은 해당 공식 revision과 대조했다.
 Compose의 `latest-nvidia-gpu-sm120-offline` 로컬 이미지 registry digest는 2026-10-01에 확인했고
 예제 설정에 고정했다. 위 표는 상위 공식 라이선스 조사이며
+확인한 API 설치 버전은 PaddleOCR 3.6.0, PaddleX 3.6.1, PaddlePaddle-GPU 3.2.1,
+FastAPI 0.136.3, Uvicorn 0.48.0, pypdfium2 5.8.0이다. VLM 이미지는
+vLLM 0.10.2와 PyTorch 2.8.0을 사용한다. 이 확인은
 전체 이미지의 Python·OS·CUDA SBOM 감사가 아니다. PDFium 등 바이너리 부속 고지도 필요하다.
 이미지·모델은 소스 저장소에 포함하지 않는다.
 
