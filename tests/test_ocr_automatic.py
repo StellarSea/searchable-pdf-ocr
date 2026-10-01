@@ -344,7 +344,7 @@ class AutomaticTests(unittest.TestCase):
     def test_recursive_batch_excludes_generated_and_custom_outputs(self):
         import ocr_batch
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
+            root = Path(td).resolve()
             names = ['book.pdf', 'sub/book2.pdf', 'ocr_output/book_auto_searchable.pdf',
                      'sub/ocr_output/page.pdf', 'custom/copied.pdf', 'book_auto_debug.pdf',
                      'book_auto_searchable.partial.pdf']
