@@ -24,7 +24,7 @@ python tools/tif_to_pdf.py "scan.tif" "input/book.pdf" --lossless
 이 옵션은 픽셀을 확대·축소하지 않고 PDF의 물리 크기를 정한다.
 
 ```powershell
-python tools/tif_to_pdf.py "scan.tif" "input/book.pdf" --dpi 600
+python tools/tif_to_pdf.py "scan.tif" "input/book.pdf" --dpi 600 --lossless
 ```
 
 - TIFF 각 프레임의 XResolution(282), YResolution(283), ResolutionUnit(296)을

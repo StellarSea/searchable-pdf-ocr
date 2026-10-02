@@ -20,6 +20,7 @@ python run.py "input/book.pdf" --out "output/book" --bookmarks
 폴더 처리는 문서별로 순차 실행하며 기본적으로 페이지 수가 적은 문서부터 처리한다.
 `--order name|size|pages`, `--redo`, `--stop-on-failure`로 순서·재실행·실패 처리를 조절한다.
 출력 폴더와 생성된 PDF는 입력 탐색에서 제외한다. OCR 옵션은 각 문서 실행에 전달한다.
+공통 `--out`에 저장하려면 PDF의 파일명(확장자 제외, 대소문자 구분 없음)이 모두 달라야 한다. 같은 이름이 있으면 공통 출력 옵션을 생략해 원본별 출력 폴더를 사용한다.
 폴더 재실행은 원본·옵션이 일치하는 완료 문서를 건너뛴다. `--no-cache`나
 `--repair-cache`를 지정하면 완료된 문서도 다시 처리한다.
 
@@ -39,7 +40,7 @@ CLI는 응답하지 않는 서비스를 시작하거나 복구할 수 있다. �
 | 보고서·상태 | DB의 `book_auto_report.md`, `book_auto_report.json`, `book_auto_status.json` |
 | 폴더 처리 로그·상태 | `.ocr/batch_logs/`, `.ocr/batch_status.json` |
 
-원시 레이아웃, 본문 Markdown, 보고서와 파생 체크포인트는 DB의 `artifacts` 테이블에 저장한다.
+본문 OCR 레이아웃과 누락 보완 기록, 본문 Markdown, 보고서와 파생 체크포인트는 DB의 `artifacts` 테이블에 저장한다.
 기존 파일 경로와 `DB경로::항목이름` 참조를 지원한다. 도구에서 직접 읽을 때는
 [구조 안내](ARCHITECTURE.md)의 텍스트 항목 API를 사용한다.
 
@@ -49,12 +50,12 @@ python run.py compact "output/book"
 python run.py organize "output/book"
 ```
 
-`export`는 자료를 파일로 내보내며 내용이 다른 기존 파일을 덮어쓰지 않는다.
+`export`는 `artifacts`의 텍스트 자료를 파일로 내보내며 내용이 다른 기존 파일을 덮어쓰지 않는다.
 `compact`와 다음 OCR 실행은 구형 JSON/MD를 잠금 안에서 DB에 통합하고,
 무결성과 바이트 일치를 확인한 중복 파일만 제거한다. `organize`는 구형 보조 파일 배치를 정리한다.
 원본·완성 PDF·모델은 통합 삭제 대상이 아니다. DB는 재개와 감사에 쓰므로 보존한다.
 
-검증 실패 시 기존 완성 PDF와 성공 보고서를 유지하고 후보 `.partial.pdf`와 실패 보고서를 남긴다.
+자동 모드의 최종 검증 실패 시 기존 완성 PDF와 성공 보고서를 유지하고 후보 `.partial.pdf`와 실패 보고서를 남긴다.
 `completed_with_warnings`는 검토할 경고가 있다는 뜻이다. 경고가 없어도 OCR 정답률을 보증하지 않는다.
 `insertion failed`는 텍스트 삽입 실패, `boxes without assigned text`는 글자가 배정되지 않은
 상자가 있다는 뜻이다. 후자는 잡음인지 실제 누락인지 원본을 확인한다.
@@ -65,10 +66,10 @@ python run.py organize "output/book"
 |---|---|
 | 기본 실행 | 자동 줄 정렬과 최종 페이지·문자·투명 텍스트·픽셀 검증 |
 | `--fast` | 문단 중심 배치. 자동 모드의 전체 줄 OCR과 최종 검증을 생략 |
-| `--paragraph` | 줄 검출 없이 문단 단위로 삽입하는 호환 모드 |
-| `--debug-lines` | 배치 영역을 표시한 별도 `_auto_debug.pdf` 생성 |
+| `--paragraph` | 줄 검출 없이 문단 단위로 삽입하는 호환 모드. 최종 전체 검증 생략 |
+| `--debug-lines` | 배치 영역을 표시한 별도 디버그 PDF 생성. 자동 모드의 이름은 `_auto_debug.pdf` |
 | `--batch 10` | 문단 요청당 페이지 수. 기본 10, 0은 전체 |
-| `--no-cache` | 문단 OCR을 다시 요청. 일치하는 재개·줄 캐시까지 모두 지우는 옵션은 아님 |
+| `--no-cache` | 완성 문단 캐시를 건너뜀. 일치하는 중간 체크포인트·줄 캐시는 재사용 가능 |
 | `--repair-cache` | 저장된 문단의 누락 의심 영역 재검토 |
 | `--no-repair` | 문단 누락 보완 생략. 줄 인식은 별도 |
 | `--no-boundary-repair` | 블록 경계 잘림 보완 생략 |
@@ -83,8 +84,8 @@ CPU 작업자, 메모리, 요청 겹치기, 서버 설정은 [성능 설정](PER
 ## 캐시와 보완 인식
 
 자동 모드는 원본이나 API 설정이 다른 캐시를 보존하고 별도 캐시를 사용한다.
-빠른 모드와 선택 페이지 모드는 불일치 캐시를 거부한다. 원본 식별자가 없는 구형 캐시에
-`--trust-cache`를 사용하려면 같은 원본인지 직접 확인해야 한다.
+비자동 모드는 불일치 캐시를 거부한다. 비자동 모드에서 원본 식별자가 없는 구형 캐시에
+`--trust-cache`를 사용하려면 같은 원본인지 직접 확인해야 한다. 자동 모드는 이런 구형 캐시도 격리한다.
 모델 변경 시 기존 DB를 보존하고 별도 출력 위치에서 실행한다.
 
 경계 보완은 블록 가장자리의 잉크를 검사하고 공백까지 확장한 영역을 재인식한다.
@@ -101,11 +102,12 @@ CPU 작업자, 메모리, 요청 겹치기, 서버 설정은 [성능 설정](PER
 `--layout-review 교정.json`은 원본 SHA-256과 교정 전 OCR 블록이 모두 일치할 때만 적용한다.
 최상위 `source_sha256`, `pages`와 페이지별 `page`, `reason`, `original_blocks`, `lines`를 둔다.
 각 줄은 `text`와 OCR 이미지 픽셀 좌표 `bbox: [x0, y0, x1, y1]`를 가진다.
+지정한 페이지의 블록 전체를 `lines`로 교체하므로 그 페이지에서 유지할 텍스트도 모두 포함해야 한다.
 검토한 줄·셀은 다시 분할하지 않고 직접 배치한다. 원시 OCR을 보존하며 파일 변경은
 완료 상태 재사용 판단에 반영된다. 작은 합성 예제는 `tests/test_ocr_regressions.py`에 있다.
 
-`--line-ocr-review 교정.json`은 줄 판단 기록의 `block_key`에
-`original`, `replacement`, `reason`을 연결한다. 원문과 줄 이미지 식별자가 맞아야 적용한다.
+`--line-ocr-review 교정.json`은 `--line-ocr-pages`와 함께 사용한다. 최상위 객체의 키는 줄 판단 기록의
+`block_key` 값이며, 각 값에 `original`, `replacement`, `reason`을 둔다. 원문과 줄 이미지 식별자가 맞아야 적용한다.
 원시 결과와 교정문을 함께 기록한다. 모델의 경계 판정이 거절돼도 식별자가 일치하는 명시적
 교정문은 원래 줄 배치를 안내로 사용하여 적용한다. 감사 기록의 `accepted`는 경계 판정이며
 적용 문구는 `reviewed`, `selected`에서 확인한다.
@@ -117,7 +119,7 @@ python run.py "input/book.pdf" --line-ocr-pages 13,17,26
 ```
 
 페이지 번호는 PDF 첫 페이지가 1이며 `all`도 지원한다. 이 호환 모드는 HTML이 아닌
-여러 줄 한글 문단을 대상으로 하므로 기본 자동 모드와 범위가 다르다.
+여러 줄 한글 문단을 대상으로 하며 최종 전체 검증을 수행하지 않는다.
 출력은 `_line_searchable.pdf`, 디버그는 `_line_debug.pdf`다.
 줄 응답은 `_line_ocr.json` 항목으로 저장하며 이미지와 API 설정이 같은 결과를 재사용한다.
 경계 안내만 사용하고 문단 원문을 유지한다. API 오류가 나면 남은 미저장 이미지 요청을 멈추고
@@ -142,6 +144,7 @@ python run.py audit "output/book/book_auto_searchable.pdf"
 ```
 
 감사는 잉크 커버리지, 문항 번호, 두 모델의 일치율로 검토할 곳을 찾는다.
+폴더를 지정하면 바로 아래의 `*_auto_searchable.pdf`를 검사한다.
 번호 범위와 반복 횟수가 알려진 문제집에만 `--items 1-100 --copies 10` 등을 지정한다.
 일반 책에는 이 옵션을 적용하지 않는다. 두 모델이 같은 곳에서 함께 틀릴 수 있으므로
 일치율은 정답률이 아니다. 실제 문자 정확도는 원본과 대조한 기준 전사로 평가한다.

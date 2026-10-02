@@ -29,11 +29,11 @@ New-Item -ItemType Directory -Force -Path "scans/book_v1/raw", "scans/book_v1/pr
 `ScanTailor-Advanced-1.1.1x64.zip`이다. 메뉴와 TIFF 저장 동작은 해당 버전 소스로 확인했으며,
 Windows UI를 직접 조작한 검증은 아니다. 다른 빌드는 지원 환경과 메뉴를 확인한다.
 
-1. **File → New Project…**에서 입력 `scans/book_v1/raw`, 출력 `scans/book_v1/processed`를 선택한다.
+1. File → New Project…에서 입력 `scans/book_v1/raw`, 출력 `scans/book_v1/processed`를 선택한다.
 2. TIFF를 추가하고 순서·누락을 확인한다. 프로젝트는 `scans/book_v1/`에 저장한다.
-3. **Tools → Fix DPI… → All Pages**에서 입력 DPI를 확인한다. 실제 600 DPI 스캔인 페이지만
+3. Tools → Fix DPI…의 All Pages 탭에서 대상 페이지·그룹을 선택하고 입력 DPI를 확인한다. 실제 600 DPI 스캔인 페이지만
    **600 × 600 → Apply**로 맞춘다. `Need Fixing`이 비어 있어도 실제 스캔 설정을 확인한다.
-4. 보정 후 **Output → Output Resolution (DPI) → Change…**에서 **600 → All pages**를 적용한다.
+4. 보정 후 Output → Output Resolution (DPI) → Change…에서 **600 → All pages**를 적용한다.
 5. Output 표시를 확인하고 모든 페이지를 일괄 처리한다. 프로젝트 저장만으로 TIFF가 생성되지는 않는다.
 
 입력 DPI는 원본 픽셀의 물리 크기를 해석하고, 출력 DPI는 보정 이미지를 생성하는 값이다.
@@ -44,6 +44,7 @@ Fix DPI가 원본 TIFF 태그까지 고쳤다고 가정하지 않는다. 설정�
 공식 소스: [입력 메뉴](https://github.com/ScanTailor-Advanced/scantailor-advanced/blob/v1.1.1/src/app/MainWindow.ui),
 [입력 DPI 처리](https://github.com/ScanTailor-Advanced/scantailor-advanced/blob/v1.1.1/src/app/FixDpiDialog.cpp),
 [출력 패널](https://github.com/ScanTailor-Advanced/scantailor-advanced/blob/v1.1.1/src/core/filters/output/OptionsWidget.ui),
+[색상 모드](https://github.com/ScanTailor-Advanced/scantailor-advanced/blob/v1.1.1/src/core/filters/output/OptionsWidget.cpp),
 [출력 적용 창](https://github.com/ScanTailor-Advanced/scantailor-advanced/blob/v1.1.1/src/core/filters/output/ChangeDpiDialog.ui),
 [TIFF 저장](https://github.com/ScanTailor-Advanced/scantailor-advanced/blob/v1.1.1/src/core/TiffWriter.cpp).
 이전 Experimental의 96 DPI 출력은 [TIFF 예외 안내](TIFF_DPI.md#기존-experimental-출력의-예외)를 따른다.
@@ -61,7 +62,7 @@ Fix DPI가 원본 TIFF 태그까지 고쳤다고 가정하지 않는다. 설정�
 | Margins / Page Layout | 내용이 잘리지 않는 여백과 판형 |
 | Output | DPI·색상 모드·최종 페이지 수, 옅은 선과 작은 부호 |
 
-컬러 그림은 Color / Grayscale, 사진과 명암은 Grayscale로 시작한다. Black and White나 Mixed는
+컬러 그림·사진·명암은 Color / Grayscale로 시작한다. Black and White나 Mixed는
 표본의 작은 글자·부호·그림 영역을 대조한 뒤 적용한다. 강한 잡티 제거·두께 조정·선명화로
 소수점·콜론·괄호·첨자·얇은 선이 사라지지 않는지 확대해서 확인한다. 굽힘 보정도 필요한 페이지에서
 효과를 확인한다. Select Content는 OCR 문장만 지정하는 기능이 아니며, 최종 TIFF에서 내용 보존을 검사한다.
@@ -112,7 +113,7 @@ python tools/tif_to_pdf.py "scans/book_v1/processed" "input/book_v1.pdf" --lossl
 변환기는 바로 아래 TIFF를 이름순·프레임순으로 조립한다. 하위 폴더는 읽지 않는다.
 `--lossless`는 보정 TIFF에 추가 JPEG 손실을 만들지 않으며 ScanTailor의 변형을 되돌리지는 않는다.
 저장·검사 완료와 프롬프트 복귀까지 기다린다. 병렬 작업자·메모리·JPEG 및 DPI 강제 옵션은
-[TIFF DPI 안내](TIFF_DPI.md)에 모았다. `--dpi`는 픽셀을 바꾸지 않고 PDF 크기를 덮어쓰므로,
+[TIFF DPI 안내](TIFF_DPI.md)에 모았다. `--dpi`는 픽셀 수를 바꾸지 않고 PDF 크기를 덮어쓰므로,
 태그만 잘못됐고 실제 출력 해상도를 확인한 경우에만 지정한다.
 
 ```powershell
@@ -149,7 +150,8 @@ python run.py export "output/book_v1/.ocr/book_v1_line_ocr.sqlite3" "output/book
 검증·audit 통과가 OCR 정답률을 보증하지 않는다. 자세한 경고·재개는 [사용 안내](OCR_USAGE.md)를 따른다.
 
 내보낸 `book_v1_auto_report.md`의 경고 페이지와 표·수식·코드를 원본 PDF와 대조한다.
-PC 뷰어에서 한글 선택·복사를 확인하고 완성본을 Goodnotes에 새 문서로 가져온 뒤 색인 완료를 기다린다.
-같은 단어의 검색·선택 위치를 확인한다. 검색 실패 시 다른 뷰어의 복사 결과와 색인 상태를 함께 확인한다.
+PC 뷰어에서 한글 선택·복사를 확인하고 완성본을 Goodnotes에 새 문서로 가져온다.
+같은 단어의 검색·선택 위치를 확인하며, iOS/iPadOS에서는 PDF 색인 완료를 기다린 뒤 검색한다.
+검색 실패 시 다른 뷰어의 복사 결과와 색인 상태를 함께 확인한다.
 정상 DPI만으로 Goodnotes 호환성을 보증하지는 않는다.
 [공식 검색 문제 안내](https://support.goodnotes.com/hc/en-us/articles/7353695209743-I-can-t-search-my-notes).

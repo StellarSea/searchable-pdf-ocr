@@ -8,7 +8,7 @@ GPU 배포는 RTX 5080 / Blackwell sm120 프로필이다. 다른 OS·Python·GPU
 
 ## 1. 호스트 설치와 오프라인 검증
 
-Git으로 저장소를 복제한 뒤 해당 폴더에서 실행한다. 검증 버전은
+저장소 복제 명령은 [README](../README.md)를 따른다. 복제한 폴더에서 실행하며 검증 버전은
 [constraints-tested.txt](../constraints-tested.txt)에 있다.
 
 ```powershell
@@ -32,6 +32,7 @@ PaddleOCR·모델·GPU·Docker·원본 책 없이 실행된다. `doctor`도 호�
 Windows에서는 NVIDIA 드라이버와 GPU 지원이 설정된 Docker Desktop의 Linux 컨테이너/WSL2가 필요하다.
 GPU·CUDA·드라이버 조건은 공식 [Blackwell 안내](https://www.paddleocr.ai/v3.5.0/en/version3.x/pipeline_usage/PaddleOCR-VL-NVIDIA-Blackwell.html)와
 [PaddleOCR-VL 배포 안내](https://www.paddleocr.ai/main/en/version3.x/pipeline_usage/PaddleOCR-VL.html)를 따른다.
+상위 Blackwell 안내는 CUDA 12.9 이상을 지원하는 NVIDIA 드라이버를 요구한다.
 Docker에서 GPU가 보이는지 먼저 확인한다. 현재 이미지·모델은 저장소에 포함하지 않는다.
 
 개인 설정이 없을 때만 예제를 복사한다. 아래 `pull`은 이미지를 다운로드하며 CLI는 자동 pull하지 않는다.
@@ -137,8 +138,17 @@ docker compose --project-directory compose -f compose/compose.yaml up -d
 python run.py doctor --services
 ```
 
+첫 시작에는 모델 로딩으로 준비가 늦어질 수 있다. health가 아직 준비되지 않았다면 기다린 뒤
+`doctor --services`를 다시 실행한다. 계속 실패하면 아래 명령으로 로그를 확인하고 원인을 해결한다.
+준비를 확인하기 위해 서비스를 반복해서 시작하거나 재시작하지 않는다.
+
+```powershell
+docker compose --project-directory compose -f compose/compose.yaml logs --tail 50
+```
+
 `doctor --services`는 모델 파일·Compose·Docker·HTTP health를 읽기 전용으로 검사한다.
 서비스를 시작·재시작하거나 OCR을 요청하지 않으며, 파일 존재/health 성공은 추론 성공을 뜻하지 않는다.
+모델 파일의 해시 검증은 위 3절의 다운로드 명령이 담당한다.
 8081의 `models`에 한국어/기본 인식기가 있어야 한다. 포트 노출과 인증 부재는 [SECURITY](../SECURITY.md)를 확인한다.
 
 권한이 있는 작은 스캔 PDF를 `input/book.pdf`에 준비한 뒤 실행한다.

@@ -35,7 +35,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe run.py test
 ```
 
-실제 OCR에는 별도 Docker 이미지와 모델 준비가 필요합니다. **[설치 안내](docs/SETUP.md)**의 환경·모델·서비스 확인을 마친 뒤 실행하세요. 이하 `python`은 의존성을 설치한 가상환경의 Python을 뜻합니다.
+실제 OCR에는 별도 Docker 이미지와 모델 준비가 필요합니다. [설치 안내](docs/SETUP.md)의 환경·모델·서비스 확인을 마친 뒤 실행하세요. 이하 `python`은 의존성을 설치한 가상환경의 Python을 뜻합니다.
 
 `python run.py doctor --services`는 모델·Docker·서비스를 읽기 전용으로 점검합니다.
 `--json`으로 진단 결과를 저장할 수 있습니다. 이 명령은 서비스를 시작하거나 OCR을 요청하지 않습니다.

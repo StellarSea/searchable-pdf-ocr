@@ -1,6 +1,6 @@
 # 의존성·모델·폰트의 라이선스
 
-직접 패키지의 라이선스 조사 기준일은 2026-09-22(Windows / Python 3.13.15),
+호스트 직접 패키지의 라이선스 조사 기준일은 2026-09-22(Windows / Python 3.13.15),
 공식 줄 모델 revision·로컬 파일 대조일은 2026-10-01이다.
 프로젝트 자체 코드와 문서는 [AGPL-3.0-only](../LICENSE)로 제공한다.
 라이선스 원문은 [SPDX의 AGPL v3 원문](https://raw.githubusercontent.com/spdx/license-list-data/main/text/AGPL-3.0-only.txt)을 수록했다.
@@ -14,7 +14,7 @@
 
 | 패키지 | 확인된 라이선스 | 역할·공식 근거 |
 |---|---|---|
-| PyMuPDF / MuPDF | AGPL v3 또는 Artifex 상용 | [PDF 읽기·렌더링·삽입·검증](https://github.com/pymupdf/PyMuPDF/blob/main/COPYING), [공식 안내](https://pymupdf.readthedocs.io/en/latest/faq/index.html) |
+| PyMuPDF / MuPDF | AGPL v3 또는 Artifex 상용 | [PDF 읽기·렌더링·삽입·검증](https://github.com/pymupdf/PyMuPDF/blob/main/COPYING), [공식 라이선스 안내](https://pymupdf.readthedocs.io/en/latest/about.html#license-and-copyright) |
 | requests | Apache-2.0 | [로컬 HTTP API](https://github.com/psf/requests/blob/main/LICENSE) |
 | pypdf | BSD-3-Clause | [독립 문자 추출 검사](https://github.com/py-pdf/pypdf/blob/main/LICENSE) |
 | NumPy | BSD-3-Clause; wheel 부속 고지 별도 | [픽셀 배열](https://github.com/numpy/numpy/blob/main/LICENSE.txt) |
@@ -44,6 +44,7 @@ wheel·실행 파일·컨테이너를 재배포할 때는 포함된 폰트·코�
 | PaddlePaddle | Apache-2.0 | [LICENSE](https://github.com/PaddlePaddle/Paddle/blob/develop/LICENSE) |
 | PaddleX | Apache-2.0 | [LICENSE](https://github.com/PaddlePaddle/PaddleX/blob/develop/LICENSE) |
 | vLLM | Apache-2.0 | [LICENSE](https://github.com/vllm-project/vllm/blob/main/LICENSE) |
+| PyTorch | BSD-3-Clause; 부속 고지 별도 | [확인한 2.8.0 LICENSE](https://github.com/pytorch/pytorch/blob/v2.8.0/LICENSE) |
 | Uvicorn | BSD-3-Clause | [줄 API 서버 LICENSE](https://github.com/encode/uvicorn/blob/main/LICENSE.md) |
 | pypdfium2 | Apache-2.0 / BSD-3-Clause | [라이선스 안내](https://pypdfium2.readthedocs.io/en/stable/readme.html#licensing) |
 | PaddleOCR-VL-1.6 | Apache-2.0 | [공식 모델 카드](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6) |

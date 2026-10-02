@@ -3,8 +3,8 @@
 ## 새 OCR 변환
 
 ```powershell
-python run.py "input/book.pdf" --out output --bookmarks
-python run.py input --recursive --bookmarks
+python run.py "input/book.pdf" --out "output/book" --bookmarks
+python run.py input --recursive --out output --bookmarks
 ```
 
 선택 기능이다. 기존 `--toc` / `--toc-all`은 유지하며 함께 지정하면 `--bookmarks`가 우선한다.
@@ -17,10 +17,11 @@ python run.py bookmarks "output/book/book_auto_searchable.pdf"
 python run.py bookmarks "output"
 ```
 
-OCR 서버 없이 기존 완성 PDF와 게시된 OCR 레이아웃을 사용한다. 해당 책의 SQLite 보고서와
+OCR 서버 없이 기본 자동 모드의 `*_auto_searchable.pdf`와 게시된 OCR 레이아웃을 사용한다.
+폴더를 지정하면 바로 아래의 해당 PDF만 갱신한다. 해당 책의 보고서·레이아웃(DB 또는 구형 파일)과
 원본 PDF가 필요하다. 원본 SHA-256과 레이아웃 해시를 검증하고 문서 출력 잠금을 획득한다.
 
-이전에 프로그램이 만든 책갈피는 이전 보고서의 제목·계층·목적지와 정확히 같을 때만 교체한다.
+이전에 `--bookmarks`나 책갈피 갱신으로 만든 책갈피는 이전 보고서의 제목·계층·목적지와 정확히 같을 때만 교체한다.
 사용자가 수정한 책갈피가 발견되면 중단한다. 프로그램 생성 이력이 없는 사용자 책갈피는 그대로 보존한다.
 갱신을 반복해도 항목을 중복 추가하지 않는다.
 
@@ -38,7 +39,7 @@ OCR 서버 없이 기존 완성 PDF와 게시된 OCR 레이아웃을 사용한�
 
 Windows 파일 잠금으로 교체가 실패하거나 PDF 교체 후 보고서 저장이 실패하면 검증 자료는 history에 남는다.
 PDF 뷰어를 닫고 `python run.py bookmarks --publish-verified "history 폴더 경로"`로 재시도한다.
-검사 당시의 원본·백업·보고서와 기존 또는 이미 게시된 PDF의 정확한 해시를 확인하므로
+검사 당시 원본·백업·후보 또는 이미 게시된 PDF의 해시와 보고서 내용을 대조하므로
 전체 렌더링은 반복하지 않는다. 새 기록은 교정 파일 해시도 대조하며 변경된 교정은 거부한다.
 교정 해시가 없는 구형 기록도 재개할 수 있지만 완료 상태에 현재 교정 해시를 추정해 넣지 않는다.
 
@@ -96,7 +97,7 @@ OCR이 제목을 짧게 오독하여 자동 대조가 불가능하면, **원본 
 
 기존 보고서의 `bookmarks`에 목차 페이지, 전체 후보 수, 확정 항목, 보류 이유, 적용한 교정,
 실제 이동 좌표와 저장 후 검증 결과를 기록한다. `bookmark_refresh`에는 갱신 전후 해시,
-백업 위치와 전체 보존 검사 결과를 기록한다. 원시 OCR 응답과 원시 캐시 항목은 그대로 유지한다.
+백업 위치, 교정 파일의 `review_sha256`과 전체 보존 검사 결과를 기록한다. 원시 OCR 응답과 원시 캐시 항목은 그대로 유지한다.
 
 `source_page_missing`은 인접한 실제 PDF 페이지의 인쇄 쪽수가 건너뛰어 해당 페이지가 없는 경우다.
 `title_not_found`, `ambiguous_title`, `destination_out_of_order` 등은 자동으로 확정하지 않은 이유다.

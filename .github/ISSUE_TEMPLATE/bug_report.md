@@ -13,9 +13,10 @@ verification, installation, or resume behavior?
 
 ## Reproduction
 
-Command, commit, Python version, OS, and (if relevant) GPU and container image tags.
-Use a small synthetic or redistributable input. Do not attach copyrighted scans,
-private OCR text, review files, databases, credentials, or unredacted logs.
+Command, commit, Python version, OS, and (if relevant) GPU and container image tags/digests.
+Use a small synthetic input or a document you have permission to redistribute.
+Do not attach private scans, scans without redistribution permission, private OCR
+text, review files, databases, credentials, or unredacted logs.
 
 ## Evidence
 
